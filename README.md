@@ -15,6 +15,7 @@ posle reinstalacije / brisanja `~/.dsh`, i da pravila budu na jednom mestu.
 | [`DSH-Termux-Kompletno-Uputstvo.md`](DSH-Termux-Kompletno-Uputstvo.md) | kompletno uputstvo sa dijagnozama |
 | [`restore.sh`](restore.sh) | vraća setup na telefon (`--dry-run` pa primena) |
 | [`skills/`](skills) | svi DSH/Claude skillovi (uključujući `restart-dsh/restart-dsh.sh`) |
+| [`tests/`](tests) | testovi pravila — `node tests/test-composer-extras-smart-default.mjs` (11 provera smart pravila) |
 | [`dsh/`](dsh) | skripte i `dsh-composer-extras` plugin |
 
 ## Vraćanje setup-a

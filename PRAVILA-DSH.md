@@ -283,3 +283,27 @@ isključivo preko njega.
   `session.lock` fajlove ni zombi procese.
 - Ne restartuj živi dsh bez izričite dozvole korisnika (kroz njega razgovara) —
   restart **na zahtev**, preko `restart-dsh`.
+
+---
+
+## 12. TESTOVI (dokazuju pravila, ne samo tvrde)
+
+Žive u **`~/dsh/tests/`** i putuju u arhivu kao `tests/` (isti relativni put
+`../dsh-composer-extras/client.js` radi i u `~/dsh` i u arhivi).
+
+```bash
+node ~/dsh/tests/test-composer-extras-smart-default.mjs      # 11 provera — smart pravilo
+node ~/dsh/tests/test-composer-extras-context-guard.mjs      # context guard, branch, newline
+```
+
+- `test-composer-extras-smart-default.mjs` — **obavezno zelen posle svake
+  promene smart pravila.** Pokriva: prazna sesija → smart ON, postojeći
+  razgovor → OFF, `…-on-` oznaka → ON, `…-off-` klik → OFF, server
+  `branch-info.smart:true` → ON.
+- `context-guard` harness ima **3 poznata crvena** (compact/draft interakcija u
+  `useEffect`-less fake React-u) — postoje i pre 2026-10-07 i nisu regresija.
+  Gledaj da se **broj** crvenih ne poveća.
+
+Harness ne pokreće browser: lažni React (`useEffect` se stvarno izvršava u
+smart testu), lažni `window.__ModuleLoader__`, `localStorage`, `ctx.sessions.list`
+i model-directory koji beleži `select()` pozive.

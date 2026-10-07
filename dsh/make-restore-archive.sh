@@ -9,7 +9,7 @@
 # Šta radi:
 #   1. uzme prethodnu arhivu kao osnovu (restore.sh, README-RESTORE.md, README.md,
 #      .gitignore, _originali/) — ali NE i njen `.git`
-#   2. osveži iz živog sistema: skripte, plugin, launcher, profil, AGENTS.md, skills, docs
+#   2. osveži iz živog sistema: skripte, plugin, launcher, profil, AGENTS.md, skills, tests, docs
 #   3. prepiše ime arhive u putanjama (stari datum -> novi)
 #   4. spakuje u <ime>.zip (python zipfile — `zip` na Termuxu nije instaliran)
 #
@@ -112,6 +112,16 @@ for s in "$H/.dsh/skills"/*; do
 	cp -rLp "$s" "$NEW/skills/$(basename "$s")" || say "  [!] skill nije kopiran: $s"
 done
 say "[ok] skills: $(ls "$NEW/skills" | wc -l) komada ($(ls "$NEW/skills" | tr '\n' ' '))"
+
+# --- 4a) testovi (dokumentuju pravila iz PRAVILA-DSH.md) ---------------------
+# `tests/*.mjs` čitaju `../dsh-composer-extras/client.js`, pa ista putanja radi
+# i u ~/dsh/tests i u arhivi/tests.
+if [ -d "$H/dsh/tests" ]; then
+	rm -rf "$NEW/tests"
+	mkdir -p "$NEW/tests"
+	cp -p "$H"/dsh/tests/*.mjs "$NEW/tests/" 2>/dev/null
+	say "[ok] tests: $(ls "$NEW/tests" 2>/dev/null | wc -l) komada"
+fi
 
 # --- 4b) čišćenje smeća ------------------------------------------------------
 # Skills umeju da nose .bak kopije i __pycache__; u arhivi nemaju šta da traže.

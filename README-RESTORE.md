@@ -87,6 +87,7 @@ bash ~/storage/shared/Download/DSH-Restore-20261007/restore.sh             # pri
 | `DIJAGNOZA-gemini-deepseek-tool-use.md` | dijagnoza `tool_use ids without tool_result` |
 | `UPUTSTVO-dodatak-dugmad.md` | dodatak: 📤/📂/☑️/🗑️ (rute, zamke, restore) |
 | `PLAN-composer-extras.md`, `PWA-AUTH-FIX.md`, `PROMPT-*.md`, `clear-context.md` | istorijski planovi/promptovi (referenca) |
+| `tests/*.mjs` | `~/dsh/tests/` — **novo 2026-10-07**: `test-composer-extras-smart-default.mjs` (11 provera smart pravila) i `test-composer-extras-context-guard.mjs`. Pokreće se sa `node tests/<fajl>.mjs` iz korena arhive (isti relativni put kao u `~/dsh`). |
 | `_originali/` | originalni fajlovi od 2026-09-15, za referencu |
 
 ## Šta NIJE u arhivi (i zašto)
