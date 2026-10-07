@@ -42,13 +42,15 @@ H="${HOME:-/data/data/com.termux/files/home}"
 WRAPPER="$H/.local/bin/dsh-termux"
 LOG="$H/dsh/restart-dsh.log"
 WEBLOG="$H/dsh/dsh-web.log"
-mkdir -p "$H/dsh"
 
-log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOG"; }
+log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$LOG" 2>/dev/null || true; }
 say() { [ "$QUIET" = 1 ] || printf '%s\n' "$*"; }
 notify() { command -v termux-notification >/dev/null 2>&1 && termux-notification --title 'restart-dsh' --content "$1" || true; }
 
-[ -x "$WRAPPER" ] || { say "[x] nema izvršnog wrappera: $WRAPPER"; log "GREŠKA: nema $WRAPPER"; exit 1; }
+# Provera PRE pravljenja log foldera: ako HOME nije naš (npr. pogrešan env),
+# `mkdir` bi bacio „Read-only file system" šum pre prave greške.
+[ -x "$WRAPPER" ] || { say "[x] nema izvršnog wrappera: $WRAPPER"; exit 1; }
+mkdir -p "$H/dsh" 2>/dev/null || true
 
 if [ "$DELAY" != 0 ]; then sleep "$DELAY"; fi
 
