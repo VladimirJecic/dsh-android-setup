@@ -83,13 +83,17 @@ for f in "${SCRIPTS[@]}"; do
 done
 say "[ok] skripte: $((${#SCRIPTS[@]} - missing))/${#SCRIPTS[@]}"
 
-# --- 3) plugin ---------------------------------------------------------------
-mkdir -p "$NEW/dsh/dsh-composer-extras"
-for f in client.js index.js package.json cordis.patch.yml; do
-	cp -p "$H/dsh/dsh-composer-extras/$f" "$NEW/dsh/dsh-composer-extras/$f" \
-		|| say "  [!] nema plugina: $f"
+# --- 3) pluginovi -------------------------------------------------------------
+# Svi lokalni pluginovi iz `dsh.profile.bundles` (patch-android-dsh.py ih drži
+# u istom spisku), sa istim fajlovima. Novi plugin se dodaje ovde.
+for plugin in dsh-composer-extras dsh-chat-jump-arrows; do
+	mkdir -p "$NEW/dsh/$plugin"
+	for f in client.js index.js package.json cordis.patch.yml; do
+		cp -p "$H/dsh/$plugin/$f" "$NEW/dsh/$plugin/$f" \
+			|| say "  [!] nema plugina $plugin: $f"
+	done
+	say "[ok] $plugin (client.js, index.js, package.json, cordis.patch.yml)"
 done
-say "[ok] dsh-composer-extras (client.js, index.js, package.json, cordis.patch.yml)"
 
 # --- 4) launcher, profil, AGENTS.md, skills ----------------------------------
 copy_one() { # $1 izvor, $2 odredište

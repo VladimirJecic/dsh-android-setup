@@ -6,7 +6,8 @@
 > je istina**, pa se ovo ažurira uz svaku izmenu.
 >
 > Stanje na dan pisanja: dsh **0.2.0-rc.2**, port **3081**, profil **web**,
-> plugin **dsh-composer-extras** (lokalni, `link:` u profil).
+> pluginovi **dsh-composer-extras** i **dsh-chat-jump-arrows** (oba lokalna,
+> `link:` u profil).
 
 ---
 
@@ -92,13 +93,16 @@ Raspored (`GEMINI_SEEK_SCHEDULE` u `client.js`):
 
 | Sesija | Smart |
 |---|---|
-| **Prazna nova sesija** (dugme „+", `SessionSummary.blank === true`) | **DA** — podrazumevano |
+| **Prazna nova sesija** (dugme „+", `SessionSummary.blank === true`, lista `ready`) | **DA** — podrazumevano |
 | Postojeći razgovor sa istorijom | **NE** |
-| Sesija koju je `branch-into-new-session` označila kao smart (`…-on-<id>`) | DA |
+| Sesija koju je `branch-into-new-session` označila kao smart (`…-on-<id>`) | DA — ali samo ako je kontekst poznat i ≤300k |
 | Bilo koja sesija sa eksplicitnim 😎 „off" (`…-off-<id>`) | NE — klik pobeđuje sve |
+| **Restart / hard refresh** velike sesije sa `…-on-<id>` oznakom | **NE** — vidi „Nepoznat kontekst" ispod |
 
-- „Prazna" = DSH-ov sopstveni `blank` flag iz `sessions.list`; DSH ga obori na
-  `false` čim prvi prompt uđe (sesija postane *engaged*).
+- „Prazna" = DSH-ov sopstveni `blank` flag iz `sessions.list`, i to **samo kad
+  je lista stvarno stigla** (`phase === "ready"`). DSH klijent za nepoznatu
+  sesiju počinje kao „conservatively blank" (`session.d.ts`), pa bi `blank:
+  true` iz liste koja još učitava vratio smart u razgovor sa istorijom.
 - **Zašto tako:** prva verzija fix-a ugasila je auto-paljenje svuda (žalba
   „sam se uključio Smart mode kada sam se prebacio na razgovor"), pa je i
   obična nova prazna sesija ostala bez smart-a — korisnik je to odbio. Sada je
@@ -106,6 +110,31 @@ Raspored (`GEMINI_SEEK_SCHEDULE` u `client.js`):
 - Stari globalni `localStorage` ključ
   `composer-extras-gemini-seek-default-enabled` se **namerno ne čita** (da
   ranije upisano `true` ne bi ponovo palilo smart svuda).
+- **Svako gašenje se PAMTI** (`…-off-<id>` u `localStorage`): i 😎 klik, i
+  granica od 300k, i **ručni izbor modela** u dropdownu. Do 2026-10-07 je
+  ručni izbor gasio smart samo u memoriji, pa ga je prvi reload/restart vratio.
+
+### Nepoznat kontekst NE SME da prebaci model (fix 2026-10-07)
+
+Žalba: „restart dsh je uzrokovao da se smart dugme uključi za ovu sesiju, a
+kontekst je već velik." Uzrok je bio **fail-open** guard: `sessionContextTokens`
+čita `contextPressure` projekciju, a ona je posle restarta/hard refresh-a
+prazna dok se sesija ne uveze i ne replay-uje — pa je `undefined` značilo
+„nije prevelika", `activateGeminiSeek` je prebacio model na Gemini, i tek je
+sledeći submit otkrio da je sesija >300k (a do tada je već bio na Gemini-ju).
+
+Pravilo sada:
+
+- `geminiContextVerdict()` vraća tri stanja: `"ok"` / `"too-big"` / `"unknown"`.
+- **Automatsko paljenje** (prazna sesija ili `…-on-` oznaka) sa `"unknown"` i
+  sesijom koja **nije dokazano prazna** → **čeka** projekciju (12 × 250 ms ≈ 3 s)
+  pa odlučuje; ako i posle toga nema broja → **ostaje isključeno**. Model se
+  **nikad** ne prebacuje na slepo.
+- **Dokazano prazna sesija** se pali odmah (nema istorije koju bi merio).
+- **Ručni 😎 klik** ostaje trenutan, ali dobija watchdog: ako se ispostavi da je
+  kontekst >300k, smart se gasi, model se vraća na DeepSeek i upisuje se „off".
+- **Submit sa >300k** sada **vraća model na DeepSeek PRE slanja** (ranije je
+  gasio smart, ali je zahtev ipak išao na Gemini koji je ostao izabran).
 
 ### Automatizam koji NE treba kvariti
 
@@ -157,9 +186,14 @@ Raspored (`GEMINI_SEEK_SCHEDULE` u `client.js`):
 ## 5. PLUGINOVI I IZMENE
 
 - Profil `web` učitava bundlove: `@deepseek-ai/dsh-base`, `@deepseek-ai/dsh-web-app`,
-  `dsh-composer-extras` (lokalni).
-- **Nova plugina ili nova ruta traže restart.** Config override postojećeg čvora
-  se primenjuje u letu (`patchReload: live`).
+  `dsh-composer-extras`, `dsh-chat-jump-arrows` (oba lokalna).
+- **Nova plugina ili nova ruta traže restart.**
+- **Ručna izmena `cordis.patch.yml` važi od sledećeg starta.** `patchReload: live`
+  stoji u `package.json` profila, ali se u 0.2.0-rc.2 **nigde u kodu ne čita**
+  (provereno 2026-10-07); launcher čita patch fajl jednom, pri bootu
+  (`readProfilePatches`). U letu se primenjuju samo izmene koje GUI
+  (Settings → Plugins) pošalje kroz loader. Zato: posle ručne izmene patcha →
+  `restart-dsh`.
 - **Klijentski bundle se NE hot-reload-uje** → hard refresh.
 - **Nikad `dsh plugin --profile web add …` dok dsh radi.** Uvek prvo ugasi:
   ```bash
@@ -176,6 +210,39 @@ Raspored (`GEMINI_SEEK_SCHEDULE` u `client.js`):
   traži `confirm:true`.
 - „Unrestricted" mod je **samo čitanje** van workspace-a (namerno odobreno).
 - `android-share`/`android-folder` idu preko `termux-share`/`am start`.
+
+### `dsh-chat-jump-arrows` — ▲▼ kroz MOJE poruke (od 2026-10-07)
+
+Namena: jedan odgovor agenta na telefonu ume da bude hiljade piksela procesa, a
+korisnikovo pitanje ostane visoko iznad ekrana. Ovaj plugin daje dva lebdeća
+chevrona uz **desnu ivicu razgovora** (ne ekrana):
+
+- **▲** = prethodna **moja** poruka (`user` ili `steering`) — sleti 12px pod vrh;
+- **▼** = sledeća moja poruka, a sa poslednje pada na **dno** (time se i DSH-ov
+  `follow-tail` sam ponovo uključi);
+- badge između njih pokazuje `n/m` (koja sam od koliko svojih poruka).
+
+Pravila koja se ne smeju pogaziti:
+
+- **Seat je `shell.overlay`** (root, click-through sloj iz `dsh-client-ui-layout`)
+  — jedini zvanični „frame-wide floating" seat. Ništa u chatu se ne patchuje, pa
+  `npm install -g @deepseek-ai/dsh@latest` ne može da ga obriše.
+- **Strelice se vide samo kad postoji bar jedna moja poruka** u DOM-u; bez
+  razgovora ili u tuđem view-u (npr. Trajectory) ne renderuje se ništa.
+- **DSH-ova kompenzacija pozicije se brani:** ako paginacija stare istorije
+  pomeri sadržaj posle sletanja, plugin jednom ispravi `scrollTop` — ali samo
+  dok se skrol ne smiri i samo ako korisnik nije dirao ekran (gest otkazuje).
+- **Ne koristi DSH interne iz `ui-chat`** (nema importa `viewport`/`scrollToTurn`);
+  čita samo DOM atribute koje je DSH sam proglasio stabilnim:
+  `[data-conversation-scroll]` (`.scrollBody`, pravi scrollport — unutrašnji
+  `.scroll` je `overflow: visible`) i `[data-chat-flow-kind="user"|"steering"]`
+  (najspoljašnji `.flowItem` sa `data-chat-anchor-key`).
+- **Zašto ne ugrađeni turn rail:** `TurnNavigator` šeta TURN-ove (ne pitanja) i
+  sakriven je na uskim ekranima (`@container (width<=900px){display:none}`), a
+  ugrađeno „to bottom" dugme je samo jednosmerna polovina ovoga.
+- Veze: `dsh.profile.bundles` + link u `profiles/web/node_modules`
+  (vidi §5), `patch-android-dsh.py` 4b/4c ih čuvaju, `make-restore-archive.sh` i
+  `restore.sh` ih nose u arhivi.
 
 ---
 
@@ -292,18 +359,98 @@ isključivo preko njega.
 `../dsh-composer-extras/client.js` radi i u `~/dsh` i u arhivi).
 
 ```bash
-node ~/dsh/tests/test-composer-extras-smart-default.mjs      # 11 provera — smart pravilo
+node ~/dsh/tests/test-composer-extras-smart-default.mjs      # 31 provera — smart pravilo + restart regresija
 node ~/dsh/tests/test-composer-extras-context-guard.mjs      # context guard, branch, newline
+node ~/dsh/tests/test-preset-compaction.mjs                  # 13 provera — compact prag 60%
+node ~/dsh/tests/test-chat-jump-arrows.mjs                   # 43 provere — ▲▼ kroz moje poruke
 ```
 
 - `test-composer-extras-smart-default.mjs` — **obavezno zelen posle svake
-  promene smart pravila.** Pokriva: prazna sesija → smart ON, postojeći
-  razgovor → OFF, `…-on-` oznaka → ON, `…-off-` klik → OFF, server
-  `branch-info.smart:true` → ON.
+  promene smart pravila.** Pokriva: prazna sesija → smart ON, lista još
+  `pending` → OFF, postojeći razgovor → OFF, `…-on-` oznaka → ON, `…-off-` klik
+  → OFF, server `branch-info.smart:true` → ON, i **restart regresiju**: neblank
+  sesija sa `…-on-` oznakom i **nepoznatim** kontekstom ne sme da prebaci model
+  na Gemini (a kad projekcija stigne sa >300k → OFF + „off" oznaka; sa <300k →
+  ON). Harness ima deterministički `setTimeout`, pa se čekanje na projekciju
+  (12 × 250 ms) pušta ručno — test ne spava 3 s.
+
+- `test-preset-compaction.mjs` — čuva §13: host `compaction-basic` je disabled,
+  sva tri preseta imaju `thresholdRatio: 0.6`, i efektivni prag ispadne tačno 60%
+  za oba rutirana modela. **Ovo je test koji pada ako DSH update promeni preset**
+  (tada pokreni `~/dsh/preset-compaction-sync.py` i ponovo ga pusti).
+
 - `context-guard` harness ima **3 poznata crvena** (compact/draft interakcija u
   `useEffect`-less fake React-u) — postoje i pre 2026-10-07 i nisu regresija.
   Gledaj da se **broj** crvenih ne poveća.
 
 Harness ne pokreće browser: lažni React (`useEffect` se stvarno izvršava u
-smart testu), lažni `window.__ModuleLoader__`, `localStorage`, `ctx.sessions.list`
-i model-directory koji beleži `select()` pozive.
+smart testu), lažni `window.__ModuleLoader__`, `localStorage`,
+`ctx.sessions.list`/`binding` (uključujući `contextPressure` projekciju) i
+model-directory koji beleži `select()` pozive.
+
+---
+
+## 13. KONTEKST, TOKEN-METAR I KOMPAKCIJA (od 2026-10-07)
+
+### Dva broja koja se stalno mešaju
+
+| Gde | Šta je | Da li samo raste |
+|---|---|---|
+| pill „… tok" u composer stats traci (ikona baze) | `tokenUsage.totals` — **kumulativni saobraćaj cele sesije** (`uncached + cacheRead + cacheWrite + output`, sabrano preko svih zahteva) | da, nikad ne pada |
+| kružić desno od inputa | `contextPressure.projectedTokens / contextWindow` — **trenutna zauzetost konteksta** | ne — pada posle compacta |
+
+- **Restart ne resetuje ni jedan broj.** Sesija se pri otvaranju replay-uje iz
+  `session.v4.jsonl.zstd` kroz projekcije, pa zbirovi ispadnu isti.
+- Reset metra = **nova sesija** (`+`); za postojeću reset ne postoji.
+- **Keširani tokeni se ponovo broje u svakom zahtevu** — u jednoj merenoj sesiji
+  98% metra je `cacheRead` (isti prompt se čita iz keša 200×). Cache hit je 50×
+  jeftiniji od miss-a, ali nije 0 i nije „već jednom brojan".
+- `compact` **ne kešira ništa** — on skraćuje prompt; keš gradi provajder sam.
+  Prvi zahtev posle compacta je zato skoro ceo cache **miss** (puna cena), pa se
+  keš u sledećih par zahteva vrati na ~99% hit.
+
+### Prozor (`contextWindow`) je per-provider/model
+
+- Prozor dolazi iz adaptera, ne iz sesije: `deepseek-official/deepseek-flash` →
+  **1.000.000**, `google/gemini-flash-lite-latest` → **1.048.576**. DSH emituje
+  `request/context` čim se provider/model/prozor promeni.
+- Brojilac (`contextPressure.pressureTokens`, iz usage-a) i imenilac
+  (`contextWindow`, iz `request/context`) su **dva nezavisna last-wins slota**,
+  pa posle promene modela procenat može **jedan zahtev** da bude netačan.
+- Zato hook/provera treba da gleda **procenat iz kružića**, nikad kumulativni
+  „… tok" (greška koja je već jednom napravljena: prag od 500.000 tokena na
+  metru koji meri saobraćaj, ne zauzetost).
+
+### Auto-compact: prag se menja na **deklaraciji preseta**, ne na host redu
+
+`compaction-basic` **ne postoji kao aktivan host red** — `dsh-web-app` ga
+isključuje (`disabled: true`) jer compaction živi u realm-u agent preseta.
+Aktivne kopije su u deklaracijama `preset-standard`, `preset-ptc`, `preset-cordis`.
+
+- Patch sa `id` menja red, ali **`config` se zamenjuje u celosti** — nikad se ne
+  spaja dubinski. Zato override preseta mora da ponovi ceo `config.plugins`.
+- To se **ne piše rukom**: `~/dsh/preset-compaction-sync.py` prepisuje
+  deklaracije iz instaliranog `dsh-web-app/presets/*.patch.yml` i ubacuje
+  `thresholdRatio`. Blok stoji između markera `# >>> preset-compaction` u
+  `~/.dsh/profiles/web/cordis.patch.yml`.
+- Launcher (`~/.local/bin/dsh-termux`) ga zove pri **svakom** startu (kao gemini
+  katalog), pa posle `npm install -g @deepseek-ai/dsh` sam uđe u sync.
+
+Efektivni prag **nije** `window × ratio`:
+
+```
+threshold = min(window × ratio, window − maxTokens − headroomTokens)
+```
+
+- `headroomTokens` default **65.536**; `maxTokens` iz request headera
+  (deepseek-flash 256.000, gemini 32.768).
+- Default `thresholdRatio` = **0.8** → deepseek-flash: `min(800.000, 678.464)` =
+  **678.464 ≈ 68%** prozora. **Ne čeka 90%.**
+- Naš `thresholdRatio` = **0.6** → deepseek **600.000** (60,0%), gemini
+  **629.145** (60,0%) — ratio veže, pressure budget ne seče.
+- `retainRatio` default 0.16 → posle compacta ostaje ~119k (deepseek) verbatim
+  repa; ako rez treba da bude blaži, podigni ga (mora ostati `< thresholdRatio`).
+- `/compact` je **ručna** komanda (`command-compact`) i radi isto kad je auto
+  isključen; auto-compact se vidi u logu kao `compaction/start` bez `command/run`
+  od korisnika.
+- **Izmene patcha važe od sledećeg starta** (§5) → posle sync-a `restart-dsh`.

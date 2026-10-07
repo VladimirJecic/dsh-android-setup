@@ -53,6 +53,20 @@ if [ -f "$GEMINI_CATALOG" ]; then
   fi
 fi
 
+# Auto-compact prag (60% konteksta): compaction-basic zivi u realm-u agent
+# preseta, a `config` patcha se zamenjuje u celosti — pa web profil drzi pun
+# override deklaracija preseta (standard/ptc/cordis). Skripta taj blok
+# regenerise iz instaliranog dsh-web-app bundle-a, tako da posle
+# `npm install -g @deepseek-ai/dsh` (novi bundle, novi preseti) sama udje u
+# sync. Idempotentna je; prijavljuje se samo ako ne uspe.
+PRESET_COMPACTION="$HOME/dsh/preset-compaction-sync.py"
+if [ -f "$PRESET_COMPACTION" ]; then
+  if ! preset_out=$(python3 "$PRESET_COMPACTION" 2>&1); then
+    echo "dsh: preset-compaction sync NIJE prosao:" >&2
+    echo "$preset_out" >&2
+  fi
+fi
+
 # Tajne (DEEPSEEK_API_KEY, HF_*, GROQ_API_KEY) stoje u fajlu sa pravima 600
 # VAN $DSH_HOME, pa ih `read ~/.dsh/.credentials.yaml` ne moze iscitati u trag
 # sesije — a odatle u eksportovani zip na deljenom storage-u. dsh ih i dalje

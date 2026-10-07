@@ -272,13 +272,55 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * True kada ova sesija više ne sme na Gemini. Nepoznata veličina (undefined)
-		 * NIKAD ne isključuje — bolje zadržati postojeće ponašanje nego ugasiti smart
-		 * naslepo kada projekcija još nije stigla.
+		 * Tri-state procena: sme li ova sesija na Gemini?
+		 *
+		 *   "ok"      — veličina konteksta je poznata i ispod granice;
+		 *   "too-big" — poznata i IZNAD granice (250k input tokena/min);
+		 *   "unknown" — projekcija još nije stigla.
+		 *
+		 * Zašto tri stanja, a ne `boolean`: posle restarta ili hard refresh-a je
+		 * `contextPressure` prazan dok se sesija ne uveze i ne replay-uje, pa je
+		 * `unknown` NAJČEŠĆE stanje prvih sekundi. Ranije je `unknown` značilo
+		 * „nije prevelika" (fail-open) — pa je restart VELIKE sesije automatski
+		 * prebacio model na Gemini i poslao zahtev koji sigurno puca na 429
+		 * (prijavljeno 2026-10-07: „restart dsh je uzrokovao da se smart dugme
+		 * uključi za ovu sesiju, a kontekst je već velik").
 		 */
-		function geminiTooBigForSession(ctx, sessionId) {
+		function geminiContextVerdict(ctx, sessionId) {
 			var tokens = sessionContextTokens(ctx, sessionId);
-			return tokens !== undefined && tokens > GEMINI_SEEK_MAX_CONTEXT_TOKENS;
+			if (tokens === undefined) return "unknown";
+			return tokens > GEMINI_SEEK_MAX_CONTEXT_TOKENS ? "too-big" : "ok";
+		}
+
+		/** True samo kad je POZNATO da je sesija prevelika (nikad na nepoznato). */
+		function geminiTooBigForSession(ctx, sessionId) {
+			return geminiContextVerdict(ctx, sessionId) === "too-big";
+		}
+
+		/**
+		 * Skini sesiju sa Gemini-ja ako je TAMO ostavio smart.
+		 *
+		 * Gleda se trenutni model u direktorijumu: ako je baš Gemini segment iz
+		 * `GEMINI_SEEK_SCHEDULE`, prebaci na DeepSeek segment. Isti potez radi i
+		 * ručni 😎 „off" (`toggle()`), a bez njega bi sesija ostala na modelu koji
+		 * ne može da primi toliki kontekst — pa bi prvi sledeći prompt pukao 429.
+		 */
+		function restoreModelOffGemini(ctx, sessionId) {
+			try {
+				var directory = ctx.modelDirectories.directoryFor(sessionId);
+				var current = directory.store.getSnapshot().current;
+				if (!current || current.provider !== "google") return;
+				var googleSeg = GEMINI_SEEK_SCHEDULE.filter(function (seg) { return seg.provider === "google"; })[0];
+				if (googleSeg === undefined || current.model !== googleSeg.model) return;
+				var deepseekSeg = GEMINI_SEEK_SCHEDULE.filter(function (seg) { return seg.provider !== "google"; })[0];
+				if (deepseekSeg === undefined) return;
+				ensureModelSelected(ctx, sessionId, deepseekSeg).catch(function (error) {
+					console.warn("[dsh-composer-extras] gemini-seek-smart: povratak na DeepSeek nije uspeo:", error);
+				});
+			} catch (error) {
+				// Model-directory može biti nedostupan (sesija se još uvozi) — tada
+				// nema ni šta da se vraća.
+			}
 		}
 
 		/**
@@ -288,6 +330,9 @@ window.__ModuleLoader__.load({
 		 */
 		function disableGeminiSeekTooBig(ctx, sessionId, state) {
 			var tokens = sessionContextTokens(ctx, sessionId);
+			// Prvo skini model sa Gemini-ja (ako ga je smart tamo stavio), pa tek
+			// onda obriši `lastAppliedModel`.
+			restoreModelOffGemini(ctx, sessionId);
 			if (state) {
 				state.enabled = false;
 				state.disabledReason = GEMINI_SEEK_TOO_BIG;
@@ -454,22 +499,30 @@ window.__ModuleLoader__.load({
 		 * pobeđuje sve (korisnikov klik).
 		 */
 		function geminiSeekDefaultEnabled(ctx, sessionId) {
-			return sessionIsBlank(ctx, sessionId);
+			return sessionAuthoritativelyBlank(ctx, sessionId);
 		}
 
 		/**
-		 * Je li ta sesija još PRAZNA (novokreirana preko „+", bez ijednog turna)?
+		 * Da li HOST tvrdi da je ta sesija još PRAZNA (novokreirana preko „+")?
 		 *
 		 * `blank` je DSH-ov sopstveni flag za „New Session" preuzimanje
-		 * (`SessionSummary.blank` u `sessions.list`); DSH ga obori na false čim
-		 * prvi prompt uđe (sesija postane „engaged"/running). Čita se iz istog
-		 * snapshot-a koji koristi sidebar, bez retain-a i bez mrežnog poziva.
+		 * (`SessionSummary.blank` u `sessions.list`), izveden iz
+		 * `sessionListMetadata.blank` — „folded prefix nema nijedan turn".
+		 *
+		 * ALI: DSH klijent drži listu kao `pending` dok host lista ne stigne, a
+		 * Session objekat za nepoznatu sesiju počinje kao „conservatively blank"
+		 * (`session.d.ts`: „unknown bare sessions begin conservatively blank").
+		 * Zato se `blank: true` sme čitati kao dokaz svežine SAMO kad je lista
+		 * stvarno stigla (`phase === "ready"`); u suprotnom je to privremena
+		 * vrednost koja bi restart-om vratila smart u razgovor sa istorijom.
 		 */
-		function sessionIsBlank(ctx, sessionId) {
+		function sessionAuthoritativelyBlank(ctx, sessionId) {
 			try {
 				var sessions = ctx.sessions;
 				if (sessions === undefined || sessions.list === undefined) return false;
-				var row = sessions.list.getSnapshot().byId[sessionId];
+				var snapshot = sessions.list.getSnapshot();
+				if (!snapshot || snapshot.phase !== "ready") return false;
+				var row = snapshot.byId[sessionId];
 				return row !== undefined && row.blank === true;
 			} catch (error) {
 				return false;
@@ -529,10 +582,98 @@ window.__ModuleLoader__.load({
 		/** Sesije za koje je branch-info već proveren (da ne šaljemo GET svaki mount). */
 		var branchInfoChecked = {};
 
+		/**
+		 * Koliko puta (i koliko često) čekamo token-meter projekciju pre nego što
+		 * odluku donesemo bez nje: 12 × 250ms ≈ 3s. Replay velike sesije posle
+		 * restarta obično stigne ranije, a duže čekanje bi značilo da korisnik
+		 * gleda ugašeno dugme bez razloga.
+		 */
+		var GEMINI_SEEK_CONTEXT_MAX_ATTEMPTS = 12;
+		var GEMINI_SEEK_CONTEXT_RETRY_MS = 250;
+		/** Sesije koje već čekaju projekciju — da se čekanje ne zakaže dvaput. */
+		var geminiSeekContextPending = {};
+
+		/**
+		 * Sigurnosna mreža za aktivaciju koja je prošla bez POZNATE veličine
+		 * konteksta (ručni 😎 klik, ili prazna sesija koja je u međuvremenu dobila
+		 * istoriju): kad projekcija stigne, ako je sesija prevelika — ugasi smart,
+		 * skini model sa Gemini-ja i zapamti „off".
+		 *
+		 * Kod automatskog paljenja ovo NIJE potrebno (tamo se čeka pre prebacivanja),
+		 * ali ručni klik mora da ostane trenutan, pa mu ovo pokriva rep.
+		 */
+		function scheduleGeminiSeekTooBigWatch(ctx, sessionId) {
+			var attempt = 0;
+			function step() {
+				if (attempt >= GEMINI_SEEK_CONTEXT_MAX_ATTEMPTS) return;
+				attempt += 1;
+				setTimeout(function () {
+					var current = geminiSeekState[sessionId];
+					if (!current || !current.enabled) return;
+					var verdict = geminiContextVerdict(ctx, sessionId);
+					if (verdict === "unknown") { step(); return; }
+					if (verdict !== "too-big") return;
+					disableGeminiSeekTooBig(ctx, sessionId, current);
+				}, GEMINI_SEEK_CONTEXT_RETRY_MS);
+			}
+			step();
+		}
+
 		/** Start (or restart) the cycle fresh on segment 0 (Gemini) and switch onto
 		 * it immediately — shared by the default-on mount path and the manual 😎
-		 * toggle, so both behave identically. */
-		function activateGeminiSeek(ctx, sessionId, notify) {
+		 * toggle, so both behave identically.
+		 *
+		 * @param options.automatic - true when the client decided to turn smart on
+		 *   by itself (blank session default or the branch „-on-" mark). Automatic
+		 *   activation REFUSES to switch models on an unknown context size; the
+		 *   manual click is honoured immediately and guarded by a watchdog instead.
+		 * @param options.attempt - internal retry counter for the context wait. */
+		function activateGeminiSeek(ctx, sessionId, notify, options) {
+			var settings = options || {};
+			var verdict = geminiContextVerdict(ctx, sessionId);
+			// Granica od 300k: sesija koja je prerasla Gemini free tier se NE
+			// vraća na Gemini — smart se gasi za tu sesiju umesto da napravi
+			// zahtev koji sigurno puca na 429.
+			if (verdict === "too-big") {
+				delete geminiSeekContextPending[sessionId];
+				geminiSeekState[sessionId] = { enabled: false, notify: notify };
+				disableGeminiSeekTooBig(ctx, sessionId, geminiSeekState[sessionId]);
+				return;
+			}
+			if (verdict === "unknown") {
+				// Automatsko paljenje NIKAD ne prebacuje model na slepo: ako
+				// veličina nije poznata a sesija NIJE dokazano prazna, sačekaj
+				// projekciju i tek onda odluči. Bez ovoga je restart velike sesije
+				// (koja nosi branch „-on-" oznaku) vraćao Gemini u nju.
+				var mayWait = settings.automatic === true && !sessionAuthoritativelyBlank(ctx, sessionId);
+				var attempt = settings.attempt || 0;
+				if (mayWait && attempt < GEMINI_SEEK_CONTEXT_MAX_ATTEMPTS) {
+					geminiSeekContextPending[sessionId] = true;
+					setTimeout(function () {
+						delete geminiSeekContextPending[sessionId];
+						// Korisnik je u međuvremenu kliknuo 😎 (ili je drugi put
+						// aktivirao smart) — ne diraj tu odluku. Samo `enabled`
+						// stanje prekida čekanje; `{enabled:false}` iz mount puta
+						// je i dalje samo „još nije odlučeno".
+						var settled = geminiSeekState[sessionId];
+						if (settled !== undefined && settled.enabled) return;
+						activateGeminiSeek(ctx, sessionId, notify, { automatic: true, attempt: attempt + 1 });
+					}, GEMINI_SEEK_CONTEXT_RETRY_MS);
+					return;
+				}
+				if (mayWait) {
+					delete geminiSeekContextPending[sessionId];
+					geminiSeekState[sessionId] = { enabled: false, notify: notify };
+					console.warn("[dsh-composer-extras] gemini-seek-smart: veličina konteksta nije poznata posle " +
+						Math.round((GEMINI_SEEK_CONTEXT_MAX_ATTEMPTS * GEMINI_SEEK_CONTEXT_RETRY_MS) / 1000) +
+						"s — ostajem na trenutnom modelu umesto da prebacim možda veliku sesiju na Gemini");
+					return;
+				}
+				// Ručni klik ili dokazano prazna sesija: nastavi odmah, ali pazi da
+				// sesija ne ostane na Gemini-ju ako se ispostavi da je prevelika.
+				scheduleGeminiSeekTooBigWatch(ctx, sessionId);
+			}
+			delete geminiSeekContextPending[sessionId];
 			// Ako je Google jos u retry-after prozoru, ne skaci tamo da odmah
 			// puknes — pocni na DeepSeek segmentu i pusti da blokada istekne.
 			var previous = geminiSeekState[sessionId];
@@ -550,14 +691,6 @@ window.__ModuleLoader__.load({
 				if (deepseekIndex !== -1) startIndex = deepseekIndex;
 			}
 			var target = GEMINI_SEEK_SCHEDULE[startIndex];
-			// Granica od 300k: sesija koja je prerasla Gemini free tier se NE
-			// vraća na Gemini — smart se gasi za tu sesiju umesto da napravi
-			// zahtev koji sigurno puca na 429.
-			if (target.provider === "google" && geminiTooBigForSession(ctx, sessionId)) {
-				geminiSeekState[sessionId] = { enabled: false, notify: notify };
-				disableGeminiSeekTooBig(ctx, sessionId, geminiSeekState[sessionId]);
-				return;
-			}
 			var state = {
 				enabled: true,
 				scheduleIndex: startIndex,
@@ -697,7 +830,17 @@ window.__ModuleLoader__.load({
 						// sesiju i prompt ide na trenutnom (DeepSeek) modelu.
 						if (seg.provider === "google" && geminiTooBigForSession(ctx, sessionId)) {
 							disableGeminiSeekTooBig(ctx, sessionId, state);
-							return originalSubmit(mode);
+							// NE šalji na modelu koji je možda ostao izabran: ako je
+							// smart ranije prebacio sesiju na Gemini, zahtev bi otišao
+							// tamo i pukao na 429. Skini je sa Gemini-ja PA pošalji.
+							var deepseekFallback = GEMINI_SEEK_SCHEDULE.filter(function (s) { return s.provider !== "google"; })[0];
+							if (deepseekFallback === undefined) return originalSubmit(mode);
+							return ensureModelSelected(ctx, sessionId, deepseekFallback).then(function () {
+								return originalSubmit(mode);
+							}).catch(function (error) {
+								console.warn("[dsh-composer-extras] gemini-seek-smart: povratak na DeepSeek nije uspeo, šaljem na trenutnom modelu:", error);
+								return originalSubmit(mode);
+							});
 						}
 						var target = seg;
 						if (seg.kind === "count") state.remaining -= 1;
@@ -750,6 +893,12 @@ window.__ModuleLoader__.load({
 						// request — the user picked one by hand in the normal dropdown.
 						// Respect that and stop overriding their choice.
 						state.enabled = false;
+						// ...i ZAPAMTI to: bez per-session „off" oznake je važilo samo
+						// do prvog remount-a, pa je restart/reload vraćao smart (i
+						// Gemini) u sesiju u kojoj ga je korisnik upravo ugasio —
+						// prijavljeno 2026-10-07 („restart je uzrokovao da se smart
+						// dugme uključi za ovu sesiju").
+						markSessionSmartOff(sessionId, true);
 						if (state.notify) state.notify();
 					});
 				}
@@ -2257,7 +2406,13 @@ window.__ModuleLoader__.load({
 						var off = sessionSmartOff(sessionId);
 						var marked = sessionSmartMarked(sessionId);
 						if (!off && (geminiSeekDefaultEnabled(ctx, sessionId) || marked)) {
-							activateGeminiSeek(ctx, sessionId, notify);
+							// `automatic: true` je nosivo: automatska aktivacija
+							// odbija da prebaci model dok veličina konteksta nije
+							// poznata (vidi `activateGeminiSeek`). Ako odluka već
+							// čeka projekciju, ne zakazuj je opet.
+							if (!geminiSeekContextPending[sessionId]) {
+								activateGeminiSeek(ctx, sessionId, notify, { automatic: true });
+							}
 						} else {
 							geminiSeekState[sessionId] = { enabled: false, notify: notify };
 							// Prvi put bez oznake: pitaj server da li je sesija
@@ -2274,7 +2429,11 @@ window.__ModuleLoader__.load({
 										markSessionSmart(sessionId);
 										var current = geminiSeekState[sessionId];
 										if (!current || !current.enabled) {
-											activateGeminiSeek(ctx, sessionId, notify);
+											// Server tvrdi da je sesija branchovana sa smart
+											// startom — to je automatska aktivacija, pa važi
+											// isto pravilo: bez poznate veličine konteksta se
+											// model NE prebacuje.
+											activateGeminiSeek(ctx, sessionId, notify, { automatic: true });
 											setTick(function (n) { return n + 1; });
 										}
 									})

@@ -29,12 +29,13 @@ Pokriva:
   4b. profil bundles — dsh ume pri bootu da resetuje
                      `~/.dsh/profiles/web/package.json` na default sablon i
                      tiho izgubi nase pluginove. 4b ih vraca u `bundles`.
-  4c. plugin link    — `dsh-composer-extras` je lokalni paket (nije na npm-u),
-                     pa ga dsh nalazi samo preko linka u node_modules na putu
-                     rezolucije profila. Reset iz 4b pojede i taj link, a dsh
+  4c. plugin link    — nasi pluginovi (`dsh-composer-extras`,
+                     `dsh-chat-jump-arrows`) su lokalni paketi (nisu na npm-u),
+                     pa ih dsh nalazi samo preko linkova u node_modules na putu
+                     rezolucije profila. Reset iz 4b pojede i te linkove, a dsh
                      tada prijavi samo "entry did not activate" na stdout-u
-                     (koji niko ne cita) — pa ikonice nestanu bez traga.
-                     4c link proverava i pravi ga bez pnpm-a.
+                     (koji niko ne cita) — pa ikonice i strelice nestanu bez
+                     traga. 4c linkove proverava i pravi ih bez pnpm-a.
 
 Upotreba:
   python3 ~/dsh/patch-android-dsh.py            # 1-4 (ziva instalacija)
@@ -60,6 +61,12 @@ DSH_PKG = PREFIX / "lib" / "node_modules" / "@deepseek-ai" / "dsh"
 SCOPED = DSH_PKG / "node_modules" / "@deepseek-ai"
 PROFILE_SCOPED = HOME / ".dsh" / "profiles" / "node_modules" / "@deepseek-ai"
 LOCAL_PLUGIN = HOME / "dsh" / "dsh-composer-extras"
+# Svi lokalni (ne-npm) pluginovi: profil ih mora imenovati u `bundles` I
+# razresiti preko linka u node_modules. Redosled je redosled upisa u `bundles`.
+LOCAL_PLUGINS = [
+    LOCAL_PLUGIN,
+    HOME / "dsh" / "dsh-chat-jump-arrows",
+]
 # Kandidati za link, redom kojim ih Node rezolucija iz profila stvarno gleda.
 # Drugi je `profiles` root store — njega pnpm (workspace je profiles/web) ne
 # prun-uje, pa je otporniji od profilinog node_modules.
@@ -783,7 +790,7 @@ def ensure_profile_bundles(check):
 
     profile = d.setdefault("dsh", {}).setdefault("profile", {})
     bundles = profile.setdefault("bundles", ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"])
-    want = ["dsh-composer-extras"]
+    want = [plugin.name for plugin in LOCAL_PLUGINS]
     # dsh-context samo ako je stvarno instaliran (pnpm ga ne vraca sam)
     for cand in (HOME / ".dsh" / "profiles" / "web" / "node_modules" / "dsh-context",
                  HOME / ".dsh" / "profiles" / "node_modules" / "dsh-context"):
@@ -806,35 +813,58 @@ def ensure_profile_bundles(check):
     return f"popravljeno (+{missing})"
 
 
-def ensure_local_plugin_link(check):
-    """Link do lokalnog `dsh-composer-extras` mora da postoji i da nije mrtav.
+def plugin_link_candidates(plugin):
+    """Putanje na kojima Node rezolucija profila trazi lokalni plugin.
 
-    `dsh-composer-extras` nije na npm-u, pa `dsh.profile.bundles` samo imenuje
-    paket — dsh ga resolvuje preko `node_modules` na putu rezolucije profila.
-    dsh-ov reset manifesta (viden 2026-09-15 01:41) pojeo je i link; plugin je
-    ostao u `bundles`, ali se nije mogao ucitati, i jedini trag je bio
-    "entry did not activate" na stdout-u. Ovde ga proveravamo tvrdo, bez pnpm-a
-    (pnpm pod zivim dsh-om je dva puta oborio proces — vidi README-RESTORE.md).
+    Prva je profilov `node_modules` (tu link drzi `dsh-composer-extras`), druga
+    je `profiles` root store — njega pnpm (workspace je `profiles/web`) ne
+    prun-uje, pa je otporniji.
     """
-    if not LOCAL_PLUGIN.is_dir():
-        return f"GRESKA: nema {LOCAL_PLUGIN} (fali ceo plugin, ne samo link)"
+    return [
+        HOME / ".dsh" / "profiles" / "web" / "node_modules" / plugin.name,
+        HOME / ".dsh" / "profiles" / "node_modules" / plugin.name,
+    ]
 
-    for cand in PLUGIN_LINK_CANDIDATES:
-        if cand.exists():
-            missing = [f for f in ("package.json", "client.js") if not (LOCAL_PLUGIN / f).is_file()]
-            if missing:
-                return f"GRESKA: link {cand} postoji, ali u pluginu fale {missing}"
-            return f"ok ({cand})"
 
-    dest = PLUGIN_LINK_CANDIDATES[1]
-    if check:
-        return f"TREBA napraviti link {dest} -> {LOCAL_PLUGIN}"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.is_symlink() or dest.exists():
-        dest.unlink()
-    dest.symlink_to(LOCAL_PLUGIN)
-    note(f"plugin link: {dest} -> {LOCAL_PLUGIN}")
-    return f"link napravljen: {dest} -> {LOCAL_PLUGIN}"
+def ensure_local_plugin_link(check):
+    """Linkovi do lokalnih (ne-npm) pluginova moraju da postoje i nisu mrtvi.
+
+    Ni `dsh-composer-extras` ni `dsh-chat-jump-arrows` nisu na npm-u, pa
+    `dsh.profile.bundles` samo IMENUJE paket — dsh ga resolvuje preko
+    `node_modules` na putu rezolucije profila. dsh-ov reset manifesta (viden
+    2026-09-15 01:41) pojeo je i link; plugin je ostao u `bundles`, ali se nije
+    mogao ucitati, i jedini trag je bio "entry did not activate" na stdout-u.
+    Ovde ih proveravamo tvrdo, bez pnpm-a (pnpm pod zivim dsh-om je dva puta
+    oborio proces — vidi README-RESTORE.md).
+
+    Vraca `; `-spojen izvestaj po plugin-u; poziv `main()` gleda da u njemu
+    nema `GRESKA`/`TREBA`.
+    """
+    results = []
+    for plugin in LOCAL_PLUGINS:
+        if not plugin.is_dir():
+            results.append(f"GRESKA: nema {plugin} (fali ceo plugin, ne samo link)")
+            continue
+        missing = [f for f in ("package.json", "client.js") if not (plugin / f).is_file()]
+        if missing:
+            results.append(f"GRESKA: u {plugin.name} fale {missing}")
+            continue
+        candidates = plugin_link_candidates(plugin)
+        live = next((cand for cand in candidates if cand.exists()), None)
+        if live is not None:
+            results.append(f"ok {plugin.name} ({live})")
+            continue
+        dest = candidates[1]
+        if check:
+            results.append(f"TREBA napraviti link {dest} -> {plugin}")
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.is_symlink() or dest.exists():
+            dest.unlink()
+        dest.symlink_to(plugin)
+        note(f"plugin link: {dest} -> {plugin}")
+        results.append(f"link napravljen za {plugin.name}: {dest}")
+    return "; ".join(results)
 
 
 def main():
@@ -952,10 +982,10 @@ def main():
     if "TREBA" in st:
         rc = 1
 
-    say("\n4c. lokalni plugin link (dsh-composer-extras nije na npm-u)")
+    say("\n4c. lokalni plugin linkovi (nasi pluginovi nisu na npm-u)")
     st = ensure_local_plugin_link(a.check)
-    say(f"{OK if st.startswith('ok') else WARN} plugin link: {st}")
-    if not st.startswith("ok"):
+    say(f"{OK if 'GRESKA' not in st and 'TREBA' not in st else WARN} plugin linkovi: {st}")
+    if "GRESKA" in st or "TREBA" in st:
         rc = 1
 
     if CHANGES and not a.check:

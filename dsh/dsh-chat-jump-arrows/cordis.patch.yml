@@ -1,0 +1,13 @@
+# dsh-chat-jump-arrows bundle patch
+#
+# Local, unpublished plugin (~/dsh/dsh-chat-jump-arrows), linked into the web
+# profile's node_modules and named in its `dsh.profile.bundles`. It never
+# touches the DSH source tree nor the global @deepseek-ai/dsh install, so
+# `npm install -g @deepseek-ai/dsh@latest` cannot remove it.
+#
+# Same shape as dsh-composer-extras: one cordis node inserted under the profile
+# tree, whose package declares `dsh.client` — that declaration is what puts the
+# browser half (@see ./client.js) into the `window.__DSH_BOOT__` graph.
+- insert:
+    - id: chat-jump-arrows
+      name: 'dsh-chat-jump-arrows'

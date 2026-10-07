@@ -118,10 +118,15 @@ for f in DSH-Termux-Kompletno-Uputstvo.md DIJAGNOZA-gemini-deepseek-tool-use.md;
 done
 say
 
-say "2. composer-extras plugin"
-do_run "mkdir -p '$H/dsh/dsh-composer-extras'"
-for f in client.js index.js package.json cordis.patch.yml; do
-  copy_in "$SRC/dsh/dsh-composer-extras/$f" "$H/dsh/dsh-composer-extras/$f"
+say "2. lokalni pluginovi"
+# Svi lokalni (ne-npm) pluginovi iz `profile/package.json` -> `dsh.profile.bundles`.
+# Novi plugin se dodaje u ovaj spisak (i u make-restore-archive.sh, i u
+# patch-android-dsh.py koji ih drži u `bundles` na živom sistemu).
+for plugin in dsh-composer-extras dsh-chat-jump-arrows; do
+  do_run "mkdir -p '$H/dsh/$plugin'"
+  for f in client.js index.js package.json cordis.patch.yml; do
+    copy_in "$SRC/dsh/$plugin/$f" "$H/dsh/$plugin/$f"
+  done
 done
 say
 
@@ -153,9 +158,11 @@ copy_in "$SRC/dsh-home/AGENTS.md" "$H/.dsh/AGENTS.md"
 
 say "5. symlink plugina u profil"
 do_run "mkdir -p '$H/.dsh/profiles/node_modules' '$H/.dsh/profiles/web/node_modules'"
-do_run "ln -sfn '$H/dsh/dsh-composer-extras' '$H/.dsh/profiles/node_modules/dsh-composer-extras'"
-do_run "ln -sfn '$H/dsh/dsh-composer-extras' '$H/.dsh/profiles/web/node_modules/dsh-composer-extras'"
-good "dsh-composer-extras -> ~/dsh/dsh-composer-extras (oba store-a)"
+for plugin in dsh-composer-extras dsh-chat-jump-arrows; do
+  do_run "ln -sfn '$H/dsh/$plugin' '$H/.dsh/profiles/node_modules/$plugin'"
+  do_run "ln -sfn '$H/dsh/$plugin' '$H/.dsh/profiles/web/node_modules/$plugin'"
+  good "$plugin -> ~/dsh/$plugin (oba store-a)"
+done
 say
 
 say "6. skills (svi, sa prilozima)"
