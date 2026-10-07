@@ -7,10 +7,17 @@
 #   SHARE=1  ...                                  # + termux-share na kraju
 #
 # Šta radi:
-#   1. uzme prethodnu arhivu kao osnovu (restore.sh, README-RESTORE.md, _originali/)
+#   1. uzme prethodnu arhivu kao osnovu (restore.sh, README-RESTORE.md, README.md,
+#      .gitignore, _originali/) — ali NE i njen `.git`
 #   2. osveži iz živog sistema: skripte, plugin, launcher, profil, AGENTS.md, skills, docs
 #   3. prepiše ime arhive u putanjama (stari datum -> novi)
 #   4. spakuje u <ime>.zip (python zipfile — `zip` na Termuxu nije instaliran)
+#
+# Od 2026-10-07 je arhiva i GIT REPO:
+#   github.com/VladimirJecic/dsh-android-setup  (branch master)
+# Posle pravljenja nove arhive: `cd` u nju, `git init -b master`, `git remote add
+# origin <url>`, `git fetch`, `git reset --mixed origin/master`, `git add -A`,
+# `git commit`, `git push`. Detalji: PRAVILA-DSH.md, sekcija 10.
 #
 # NE uzima: tajne (~/.config/dsh-secrets.env, .credentials.yaml), sesije, logove,
 # .bak fajlove, screenshot-ove, __pycache__, node_modules.
@@ -35,6 +42,10 @@ if [ -d "$NEW" ]; then
 elif [ -n "$PREV" ]; then
 	rm -rf "$NEW"
 	cp -r "$PREV" "$NEW" || { say "[x] kopiranje osnove nije uspelo"; exit 1; }
+	# Arhiva je od 2026-10-07 i git repo (github.com/VladimirJecic/dsh-android-setup).
+	# `.git` se NE prenosi u novu arhivu: novi datum dobija svoj `git init`, a
+	# stari istorijat/remote bi samo zbunio i udvostručio repo.
+	rm -rf "$NEW/.git"
 	rm -f "$DL/DSH-Restore-$(basename "$PREV" | sed 's/DSH-Restore-//').zip"
 else
 	mkdir -p "$NEW"
@@ -137,8 +148,8 @@ fi
 say
 say "sadržaj:"
 du -sh "$NEW" | sed 's/^/  /'
-find "$NEW" -type f | sed "s|$NEW/|  |" | sort
-[ -n "$PREV" ] && { say; say "razlike prema $(basename "$PREV"):"; diff -rq "$PREV" "$NEW" 2>/dev/null | sed 's/^/  /' | head -40; }
+find "$NEW" -type f -not -path '*/.git/*' | sed "s|$NEW/|  |" | sort
+[ -n "$PREV" ] && { say; say "razlike prema $(basename "$PREV"):"; diff -rq -x '.git' "$PREV" "$NEW" 2>/dev/null | sed 's/^/  /' | head -40; }
 
 # --- 7) zip ------------------------------------------------------------------
 if [ "${NOZIP:-0}" != 1 ]; then
@@ -153,7 +164,9 @@ out = os.path.join(base, name + ".zip")
 n = 0
 with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames.sort()
+        # `.git` NE ide u zip: arhiva je od 2026-10-07 i git repo, ali zip je
+        # samo prenosivi snapshot sadržaja, ne i istorijat/remote.
+        dirnames[:] = sorted(d for d in dirnames if d != ".git")
         for fn in sorted(filenames):
             full = os.path.join(dirpath, fn)
             z.write(full, os.path.relpath(full, base))

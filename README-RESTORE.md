@@ -1,6 +1,6 @@
 # DSH Termux — restore arhiva (2026-10-07)
 
-> Arhiva je preimenovana iz `DSH-Restore-20261006` i osvežena **2026-10-07**:
+> Arhiva je osvežena **2026-10-07** (datum joj je u imenu foldera):
 > **ujedinjen restart** (jedina komanda `restart-dsh`, skill + GUI komanda nad
 > istim skriptom; ukinut dupli `/restart`), **prazna nova sesija (`+`) je
 > ponovo smart po defaultu** (postojeći razgovori nisu), dodat je
