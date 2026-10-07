@@ -1,0 +1,110 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# DeepSeek Harness launcher za Termux/Android.
+#
+#   --expose-internals   : trazi ga cordis-plugin-hmr; ne moze se proslediti kroz NODE_OPTIONS
+#   --max-old-space-size : podrazumevani V8 heap u Termuxu je prenizak za boot
+#
+# Bez argumenata dize Web UI na portu 3081 (3080 drzi druga, sandboxovana
+# instanca i nju ne diramo). Sa argumentima je cist passthrough ka dsh.
+#
+# Android patch-evi (hard-link / dir-fsync / ripgrep / flock / cache-slot) zive
+# u ~/dsh/patch-android-dsh.py i primenjuju se automatski pri svakom pokretanju,
+# tako da ih `npm install` ne moze trajno obrisati.
+#
+# UPDATE SE NE RADI ODAVDE. Auto-update (cron + >24h fallback) je ukinut
+# 2026-09-29; update je iskljucivo rucni: ~/dsh/dsh-update.sh.
+
+set -uo pipefail
+
+DSH_BIN=/data/data/com.termux/files/usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js
+# Eksplicitna putanja do package.json: `$DSH_BIN/../package.json` se normalizuje
+# u `lib/package.json` (bin.js je FAJL, ne direktorijum), pa verzija ispadne "?".
+DSH_PKG_JSON=/data/data/com.termux/files/usr/lib/node_modules/@deepseek-ai/dsh/package.json
+DSH_PORT=3081
+
+# Podrazumevani nivo dozvola: "Full access" (danger-full-access). Na Androidu
+# workspace-write nema upotrebljiv sandbox backend (nema bubblewrap/Landlock),
+# pa je danger-full-access jedini rezim koji stvarno radi. sandbox-policy,
+# approval i permission-presets svi citaju DSH_PERMISSION_MODE, pa ga postavlja
+# na danger-full-access kao default za nove sesije. Okolinu (env) i dalje postujemo.
+export DSH_PERMISSION_MODE="${DSH_PERMISSION_MODE:-danger-full-access}"
+
+# npm update prepise node_modules i obrise patch-eve; skripta je idempotentna,
+# pa je jeftino pustiti je svaki put. Prijavi se samo ako nesto ne uspe.
+# --pwa-samesite: session cookie Strict -> Lax. Bez toga WebAPK ("DSH 手机版")
+# dobija 401 pri pokretanju iz lansera (cross-site navigacija ne nosi Strict cookie).
+PATCHES="$HOME/dsh/patch-android-dsh.py"
+if [ -f "$PATCHES" ]; then
+  if ! patch_out=$(python3 "$PATCHES" --pwa-samesite 2>&1); then
+    echo "dsh: Android patch-evi NISU primenjeni u celosti:" >&2
+    echo "$patch_out" >&2
+  fi
+fi
+
+# Google/Gemini model katalog: drzi pi-ai katalog na samo Flash/Flash-Lite/Pro
+# modelima i uklanja ugaSene generacije (gemini-2.0-* itd.). Idempotentno, pa
+# ga pustamo pri svakom startu — isto kao i Android patch-eve iznad, da ga
+# `npm install -g @deepseek-ai/dsh` ne moze trajno obrisati.
+GEMINI_CATALOG="$HOME/dsh/gemini-catalog-update.py"
+if [ -f "$GEMINI_CATALOG" ]; then
+  if ! gemini_out=$(python3 "$GEMINI_CATALOG" 2>&1); then
+    echo "dsh: gemini katalog NIJE azuriran:" >&2
+    echo "$gemini_out" >&2
+  fi
+fi
+
+# Tajne (DEEPSEEK_API_KEY, HF_*, GROQ_API_KEY) stoje u fajlu sa pravima 600
+# VAN $DSH_HOME, pa ih `read ~/.dsh/.credentials.yaml` ne moze iscitati u trag
+# sesije — a odatle u eksportovani zip na deljenom storage-u. dsh ih i dalje
+# vidi normalno: credentials-local prvo gleda nasledjeni env (source=env), pa
+# tek onda fajl. Nijedan alat nije ogranicen.
+SECRETS="$HOME/.config/dsh-secrets.env"
+if [ -f "$SECRETS" ]; then
+  # shellcheck source=/dev/null
+  . "$SECRETS"
+else
+  echo "dsh: nema $SECRETS — kljucevi nisu ucitani." >&2
+fi
+
+# --- Verzije pri startu (INFORMATIVNO — nista se ne instalira) ---------------
+# Auto-update je UKINUT 2026-09-29. Ovde nema pozadinske provere, nema cron-a i
+# nema vremenski uslovljenog okidaca: ispisuje se samo koja je verzija na disku
+# i koja je poslednja na npm-u, pa se odluka donosi RUCNO (~/dsh/dsh-update.sh).
+# `timeout` garantuje da offline/mrtav registry ne odlozi podizanje servera.
+print_versions() {
+  local installed latest
+  installed=$(node -p "require('$DSH_PKG_JSON').version" 2>/dev/null)
+  latest=$(timeout 12 npm view @deepseek-ai/dsh version 2>/dev/null | tail -1)
+  echo "dsh: verzija — instalirano=${installed:-?} npm-latest=${latest:-nedostupno}"
+  if [ -n "$latest" ] && [ -n "$installed" ] && [ "$installed" != "$latest" ]; then
+    echo "dsh: novija verzija je dostupna; update je ISKLJUCIVO RUCNI -> ~/dsh/dsh-update.sh"
+  fi
+}
+
+run() { exec node --expose-internals --max-old-space-size=4096 \
+         --require "$HOME/dsh/no-hardlink.cjs" "$DSH_BIN" "$@"; }
+
+# Sa argumentima -> passthrough (dsh plugin ..., dsh --profile headless "...", itd.)
+# Verzije idu na stderr da ne zaprljaju stdout masinski citljivih podkomandi.
+if [ "$#" -gt 0 ]; then print_versions >&2; run "$@"; fi
+
+print_versions
+
+port_free() {
+  node -e '
+    const net = require("net");
+    const s = net.createServer();
+    s.once("error", () => process.exit(1));
+    s.once("listening", () => s.close(() => process.exit(0)));
+    s.listen(Number(process.argv[1]), "127.0.0.1");
+  ' "$1" 2>/dev/null
+}
+
+if ! port_free "$DSH_PORT"; then
+  echo "dsh: port $DSH_PORT je vec zauzet — verovatno dsh koji jos radi." >&2
+  echo "     Otvori http://127.0.0.1:$DSH_PORT ili ugasi staru instancu:" >&2
+  echo "     pkill -f 'dsh/lib/bin[.]js'" >&2
+  exit 1
+fi
+
+run web --port "$DSH_PORT"

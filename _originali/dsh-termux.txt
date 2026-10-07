@@ -1,0 +1,100 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# DeepSeek Harness launcher za Termux/Android.
+#
+#   --expose-internals   : trazi ga cordis-plugin-hmr; ne moze se proslediti kroz NODE_OPTIONS
+#   --max-old-space-size : podrazumevani V8 heap u Termuxu je prenizak za boot
+#
+# Bez argumenata dize Web UI na portu 3081 (3080 drzi druga, sandboxovana
+# instanca i nju ne diramo). Sa argumentima je cist passthrough ka dsh.
+#
+# Android patch-evi (hard-link / dir-fsync / ripgrep) zive u
+# ~/dsh/patch-android-dsh.py i primenjuju se automatski pri svakom pokretanju,
+# tako da ih `npm install -g @deepseek-ai/dsh` ne moze trajno obrisati.
+
+set -uo pipefail
+
+DSH_BIN=/data/data/com.termux/files/usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js
+DSH_PORT=3081
+
+# Podrazumevani nivo dozvola: "Full access" (danger-full-access). Na Androidu
+# workspace-write nema upotrebljiv sandbox backend (nema bubblewrap/Landlock),
+# pa je danger-full-access jedini rezim koji stvarno radi. sandbox-policy,
+# approval i permission-presets svi citaju DSH_PERMISSION_MODE, pa ga postavlja
+# na danger-full-access kao default za nove sesije. Okolinu (env) i dalje postujemo.
+export DSH_PERMISSION_MODE="${DSH_PERMISSION_MODE:-danger-full-access}"
+
+# npm update prepise node_modules i obrise patch-eve; skripta je idempotentna,
+# pa je jeftino pustiti je svaki put. Prijavi se samo ako nesto ne uspe.
+PATCHES="$HOME/dsh/patch-android-dsh.py"
+if [ -f "$PATCHES" ]; then
+  if ! patch_out=$(python3 "$PATCHES" 2>&1); then
+    echo "dsh: Android patch-evi NISU primenjeni u celosti:" >&2
+    echo "$patch_out" >&2
+  fi
+fi
+
+# Google/Gemini model katalog: drzi pi-ai katalog na samo Flash/Flash-Lite/Pro
+# modelima i uklanja ugaSene generacije (gemini-2.0-* itd.). Idempotentno, pa
+# ga pustamo pri svakom startu — isto kao i Android patch-eve iznad, da ga
+# `npm install -g @deepseek-ai/dsh` ne moze trajno obrisati.
+GEMINI_CATALOG="$HOME/dsh/gemini-catalog-update.py"
+if [ -f "$GEMINI_CATALOG" ]; then
+  if ! gemini_out=$(python3 "$GEMINI_CATALOG" 2>&1); then
+    echo "dsh: gemini katalog NIJE azuriran:" >&2
+    echo "$gemini_out" >&2
+  fi
+fi
+
+# Tajne (DEEPSEEK_API_KEY, HF_*, GROQ_API_KEY) stoje u fajlu sa pravima 600
+# VAN $DSH_HOME, pa ih `read ~/.dsh/.credentials.yaml` ne moze iscitati u trag
+# sesije — a odatle u eksportovani zip na deljenom storage-u. dsh ih i dalje
+# vidi normalno: credentials-local prvo gleda nasledjeni env (source=env), pa
+# tek onda fajl. Nijedan alat nije ogranicen.
+SECRETS="$HOME/.config/dsh-secrets.env"
+if [ -f "$SECRETS" ]; then
+  # shellcheck source=/dev/null
+  . "$SECRETS"
+else
+  echo "dsh: nema $SECRETS — kljucevi nisu ucitani." >&2
+fi
+
+# Fallback za dnevni auto-update: cron (23:55, vidi `crontab -l`) je primarni
+# okidac, ali crond zivi samo dok postoji Termux sesija (nema termux-boot),
+# pa moze da preskoci vece kad je telefon/app ugasen. Ako je od poslednje
+# provere proslo >24h, odradi je ovde pre podizanja servera — jeftino kad je
+# svez update vec primenjen (auto-update skripta odmah izadje).
+AUTO_UPDATE="$HOME/dsh/dsh-auto-update.sh"
+STAMP="$HOME/.dsh/.last-update-check"
+if [ -f "$AUTO_UPDATE" ]; then
+  now=$(date +%s)
+  last=$(cat "$STAMP" 2>/dev/null || echo 0)
+  if [ $(( now - last )) -gt 86400 ]; then
+    echo "dsh: >24h od poslednje provere update-a, proveravam ..." >&2
+    "$AUTO_UPDATE" || echo "dsh: auto-update fallback zavrsio sa greskom (vidi ~/dsh/auto-update.log)" >&2
+  fi
+fi
+
+run() { exec node --expose-internals --max-old-space-size=4096 \
+         --require "$HOME/dsh/no-hardlink.cjs" "$DSH_BIN" "$@"; }
+
+# Sa argumentima -> passthrough (dsh plugin ..., dsh --profile headless "...", itd.)
+if [ "$#" -gt 0 ]; then run "$@"; fi
+
+port_free() {
+  node -e '
+    const net = require("net");
+    const s = net.createServer();
+    s.once("error", () => process.exit(1));
+    s.once("listening", () => s.close(() => process.exit(0)));
+    s.listen(Number(process.argv[1]), "127.0.0.1");
+  ' "$1" 2>/dev/null
+}
+
+if ! port_free "$DSH_PORT"; then
+  echo "dsh: port $DSH_PORT je vec zauzet — verovatno dsh koji jos radi." >&2
+  echo "     Otvori http://127.0.0.1:$DSH_PORT ili ugasi staru instancu:" >&2
+  echo "     pkill -f 'dsh/lib/bin[.]js'" >&2
+  exit 1
+fi
+
+run web --port "$DSH_PORT"

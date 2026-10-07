@@ -1,0 +1,11 @@
+# dsh-composer-extras bundle patch
+#
+# Local, unpublished plugin (~/dsh/dsh-composer-extras, linked into the web
+# profile via `link:` in its package.json — never touches DSH source, never
+# touches npm's global @deepseek-ai/dsh install, so `npm install -g
+# @deepseek-ai/dsh@latest` cannot remove it). Same shape as
+# dsh-better-sidebar's own cordis.patch.yml: a single `insert` mounting this
+# package as one cordis node under the profile tree.
+- insert:
+    - id: composer-extras
+      name: 'dsh-composer-extras'

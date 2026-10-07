@@ -1,0 +1,13 @@
+# Tajne i privatno — NIKAD u ovaj repo.
+*.env
+dsh-secrets.env
+.credentials.yaml
+settings.yaml
+settings.yaml.imported
+sessions/
+node_modules/
+__pycache__/
+*.pyc
+*.bak-*
+*.log
+*.zip

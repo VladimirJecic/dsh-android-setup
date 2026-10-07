@@ -1,0 +1,30 @@
+# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+#
+# llm-pi-ai: katalog sveden na Gemini "latest" Flash par.
+#
+# `deepseek-flash` se NE deklarise ovde. Sluzi ga native `llm-deepseek`
+# adapter iz dsh-base, koji vec registruje rutu `deepseek-official`; drugi
+# adapter na istoj ruti se odbija kao DUPLICATE_ADAPTER. Zapis pod `google`
+# bi pak trazio da Google servira DeepSeek model — obe varijante su greska.
+#
+# Odrzava ga ~/dsh/gemini-catalog-update.py (launcher ga zove pri startu).
+- id: llm-pi-ai
+  config:
+    providers:
+      google:
+        apiKeyEnv: GOOGLE_API_KEY
+        models:
+          - id: gemini-flash-latest
+          - id: gemini-flash-lite-latest
+- id: ui-settings-general
+  name: "@deepseek-ai/dsh-client-ui-settings-general"
+  config:
+    welcomeNoticeVersion: 2026-09-28.1
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: deepseek-official
+    model: deepseek-flash
+    reasoningEffort: high
