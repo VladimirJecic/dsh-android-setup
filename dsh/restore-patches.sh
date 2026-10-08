@@ -8,8 +8,8 @@
 #   bash ~/dsh/restore-patches.sh --check   # samo prikazi, nista ne menja
 #   bash ~/dsh/restore-patches.sh           # primeni
 #
-# Izvor je NAJNOVIJA arhiva u ~/storage/shared/Download (DSH-Restore-<datum>),
-# pa se ne mora rucno menjati ime foldera posle svakog pakovanja.
+# Izvor je arhiva u ~/storage/shared/Download: `DSH-Restore` (bez datuma, od
+# 2026-10-08); razume i stari `DSH-Restore-<datum>` ako je ostao od ranije.
 #
 # NE dira tajne (API kljuceve) — za to vidi restore.sh u korenu foldera.
 
@@ -18,8 +18,13 @@ set -uo pipefail
 DL="${DSH_RESTORE_DL:-/storage/emulated/0/Download}"
 SRC="${DSH_RESTORE_SRC:-}"
 if [ -z "$SRC" ]; then
-  newest="$(ls -d "$DL"/DSH-Restore-*/ 2>/dev/null | sort | tail -1)"
-  SRC="${newest%/}/dsh"
+  # Prvo arhiva bez datuma (2026-10-08+), pa stari datumski folder ako postoji.
+  if [ -d "$DL/DSH-Restore/dsh" ]; then
+    SRC="$DL/DSH-Restore/dsh"
+  else
+    newest="$(ls -d "$DL"/DSH-Restore-*/ 2>/dev/null | sort | tail -1)"
+    SRC="${newest%/}/dsh"
+  fi
 fi
 DEST="$HOME/dsh"
 # Skripte koje se cesto menjaju — ovo je ono sto `restore-patches.sh` vraca.

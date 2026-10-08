@@ -1,104 +1,100 @@
 # 07. Restore arhiva i git
 
 > Deo [`rules/`](README.md) — indeks: [`README.md`](README.md). Skripte:
-> `~/dsh/make-restore-archive.sh`, `restore.sh` (u arhivi),
-> `~/dsh/restore-patches.sh`.
+> `~/dsh/make-restore-archive.sh`, `~/dsh/restore/*` (bazni fajlovi arhive),
+> `restore.sh` i `README*.md` (u arhivi), `~/dsh/restore-patches.sh`.
 
 ## Šta je arhiva
 
 - **Živi izvor je `~/dsh`** (+ `~/.dsh`, `~/.local/bin/dsh-termux`, profil).
-  Arhiva je **snapshot** tog stanja: folder
-  `/storage/emulated/0/Download/DSH-Restore-YYYYMMDD` + istoimeni `.zip`.
-- Arhiva je istovremeno i **git repo** → <https://github.com/VladimirJecic/dsh-android-setup.git>
+  Arhiva je **snapshot** tog stanja u **jednom folderu bez datuma**:
+  `/storage/emulated/0/Download/DSH-Restore`.
+- Isti folder je i **git repo** → <https://github.com/VladimirJecic/dsh-android-setup.git>
   (branch `master`, nalog **VladimirJecic**; auth preko `gh`,
   `gh auth git-credential` je u `~/.gitconfig`, `git push` ne pita ništa).
-- **Sadržaj repo-a = sadržaj `DSH-Restore-YYYYMMDD` foldera** (bez tajni).
-  Commit-uje se **iz tog foldera**.
+- **Datum je izbačen 2026-10-08:** arhiva se više ne deli preko Google Drive-a
+  nego kroz git, pa se **osvežava u mestu**. Nema kopiranja prethodne arhive, ni
+  prepisivanja datuma u putanjama, ni „novi datum = novi folder" — time je otpao
+  i najveći deo zakomplikovanosti stare skripte.
+- Postoji i `DSH-Restore.zip` — **samo prenosivi snapshot** (bez `.git`) za
+  `SHARE=1`/share sheet. Istorija i remote žive u git-u.
 
 ## Pakovanje (`make-restore-archive.sh`)
 
 ```bash
-bash ~/dsh/make-restore-archive.sh            # datum = danas (YYYYMMDD)
-bash ~/dsh/make-restore-archive.sh 20261007   # osveži POSTOJEĆI folder tog datuma
+bash ~/dsh/make-restore-archive.sh            # osveži folder + .zip
 NOZIP=1 bash ~/dsh/make-restore-archive.sh    # samo folder
 SHARE=1 bash ~/dsh/make-restore-archive.sh    # + Android share sheet
+DSH_RESTORE_DL=/drugi/Download bash ~/dsh/make-restore-archive.sh
 ```
 
-Šta radi:
+Sadržaj je **100% izveden iz živog sistema**, pa je osvežavanje egzaktno:
 
-1. uzme **prethodnu** arhivu kao osnovu (`restore.sh`, `README-RESTORE.md`,
-   `README.md`, `.gitignore`) — ali **ne** njen `.git`; ako folder za taj datum
-   već postoji, **osvežava ga u mestu** i ne dira `.git`;
-2. osveži iz živog sistema: `~/dsh/*.md` (u koren arhive), **`~/dsh/rules/*.md`
-   → `rules/`**, skripte iz `SCRIPTS` spiska → `dsh/`, oba lokalna plugina,
-   `bin/dsh-termux`, profil (`package.json`, `cordis.patch.yml`),
-   `dsh-home/AGENTS.md`, `skills/*` (symlinkovi se dereferenciraju),
-   `tests/*.mjs` + `tests/*.py`;
-3. prepiše ime arhive u putanjama (stari datum → novi, i u arhivi i u `~/dsh`) —
-   samo ako je `PREV` drugi datum;
-4. očisti `__pycache__`, `*.bak-*`, `*.pyc`;
-5. spakuje `.zip` (python `zipfile`; `zip` na Termuxu nije instaliran).
+| Izvor | Gde ide u arhivi |
+|---|---|
+| `~/dsh/restore/{restore.sh,README.md,README-RESTORE.md,.gitignore}` | koren |
+| `~/dsh/*.md` (uputstvo, `PRAVILA-DSH.md` indeks, `UPUTSTVO-*`) | koren |
+| `~/dsh/rules/*.md` | `rules/` |
+| `~/dsh/<SCRIPTS>` (spisak u skripti) | `dsh/` |
+| `~/dsh/dsh-composer-extras/`, `~/dsh/dsh-chat-jump-arrows/` | `dsh/<plugin>/` |
+| `~/dsh/tests/*.mjs`, `*.py` | `tests/` |
+| `~/.local/bin/dsh-termux` | `bin/` |
+| `~/.dsh/profiles/web/{package.json,cordis.patch.yml}` | `profile/` |
+| `~/.dsh/AGENTS.md` | `dsh-home/AGENTS.md` |
+| `~/.dsh/skills/*` (symlinkovi se dereferenciraju) | `skills/` |
+
+**Pre kopiranja se briše sve osim `.git`.** Zato:
+
+- **obrisan fajl u `~/dsh` nestaje i iz arhive** (nema više ručnog `git rm`
+  posledica),
+- svako pokretanje daje isto stanje (idempotentno), a `git status --short` koji
+  skript ispiše na kraju pokaže tačno šta se promenilo.
 
 **Pravila:**
 
-- **Obrisan fajl se NE vraća** osvežavanjem u mestu — ali ako praviš **novi
-  datum**, folder se kopira iz prethodne arhive, pa tamo obrisano **vaskrsne**:
-  obriši ga i u novom folderu.
-- Novi lokalni plugin → dodaj ga u `make-restore-archive.sh` (`for plugin in …`)
-  **i** u `patch-android-dsh.py` (`LOCAL_PLUGINS`)
+- **Bazne fajlove arhive menjaj u `~/dsh/restore/`**, nikad u arhivi — arhiva se
+  prepisuje iz njih.
+- Nova operativna skripta → dodaj je u `SCRIPTS` (u `make-restore-archive.sh`)
+  **i** u `restore.sh` (`DSH_FILES`), inače restore ostavi dokumentovanu komandu
+  bez skripte.
+- Novi lokalni plugin → dodaj ga u `make-restore-archive.sh` (`for plugin in …`),
+  `patch-android-dsh.py` (`LOCAL_PLUGINS`) i `restore.sh`
   ([`04-instalacija.md`](04-instalacija.md)).
-- Nova operativna skripta → dodaj je u `SCRIPTS` **i** u `restore.sh`
-  (`DSH_FILES`), inače restore ostavi dokumentovanu komandu bez skripte.
-- **Nikad ne komituj:** API ključeve, `~/.dsh/sessions/`,
-  `.credentials.yaml`, `settings.yaml`, logove, `.bak` fajlove, screenshote,
-  `node_modules`, `__pycache__`.
+- **Nikad ne komituj:** API ključeve, `~/.dsh/sessions/`, `.credentials.yaml`,
+  `settings.yaml`, logove, `.bak` fajlove, screenshote, `node_modules`,
+  `__pycache__`.
 
-## Vraćanje (`restore.sh`)
-
-- U arhivi: `bash restore.sh --dry-run` (samo prijava) pa `bash restore.sh`.
-- Vraća u `~/dsh` skripte, **`rules/`**, dokumentaciju, pluginove; u profil
-  `package.json` + `cordis.patch.yml`; u `~/.local/bin` launcher; u `~/.dsh`
-  `AGENTS.md` i `skills/*`. Tajne se unose ručno (korak 9).
-- Za samo vraćanje `~/dsh` skripti i zakrpa (bez promene verzije):
-  `bash ~/dsh/restore-patches.sh` — sam nađe najnoviju arhivu u
-  `~/storage/shared/Download`.
-
-## Git workflow (ono što se stvarno radi)
+## Objava (git)
 
 ```bash
-# 1. izmeni živi sistem (~/dsh, plugin, profil, pravila)
-# 2. osveži arhivu (isti datum da istorija ostane neprekinuta)
-bash ~/dsh/make-restore-archive.sh 20261007
-# 3. proveri i objavi
-cd /storage/emulated/0/Download/DSH-Restore-20261007
-git status --short
+bash ~/dsh/make-restore-archive.sh          # 1. osveži iz živog sistema
+cd /storage/emulated/0/Download/DSH-Restore
+git status --short                          # 2. pogledaj šta se promenilo
 git add -A && git commit -m "<kratko, srpski>" && git push origin master
 ```
 
 - Commit poruka: kratak srpski naslov; telo po potrebi (šta i zašto).
 - **Provera pre commit-a:** `grep -rniE "sk-[a-z0-9]{8,}" .` (bez `.git`) i
   `git status` — nijedna tajna, nijedan log.
-- Kod **novog datuma** (nov folder) repo se povezuje prvi put:
+- Ako `.git` iz nekog razloga ne postoji (nov telefon, obrisan folder):
   ```bash
-  cd /storage/emulated/0/Download/DSH-Restore-<danas>
+  cd /storage/emulated/0/Download/DSH-Restore
   git init && git branch -M master
   git remote add origin https://github.com/VladimirJecic/dsh-android-setup.git
   git fetch origin && git reset --mixed origin/master
-  git add -A && git commit -m "DSH restore <danas>" && git push -u origin master
+  git add -A && git commit -m "DSH restore" && git push -u origin master
   ```
   (`reset --mixed` da se istorija nastavi, a ne da nastane unrelated commit.)
-- Pravilo iz prakse: kad se folder arhive **ne menja** (isti datum), drži ga kao
-  jedini worktree tog repo-a; starije foldere sa svojim `.git` možeš obrisati kad
-  te verzije više ne trebaju.
+- Stariji datumski folderi (`DSH-Restore-20261007` i sl.) su istorijski; kad
+  zatrebaju, mogu se obrisati — jedini radni worktree je `DSH-Restore`.
 
-## Šta putuje, a šta ne
+## Vraćanje (`restore.sh`)
 
-| Putuje u arhivu | Ne putuje |
-|---|---|
-| `restore.sh`, `README.md`, `README-RESTORE.md`, `.gitignore` | tajne (`~/.config/dsh-secrets.env`) |
-| `~/dsh/*.md` (uputstvo, `PRAVILA-DSH.md` indeks, `UPUTSTVO-*`) | `~/.dsh/.credentials.yaml`, `settings.yaml` |
-| **`rules/*.md`** | `~/.dsh/sessions/`, `session_projcache` |
-| `dsh/*.py|*.sh|*.mjs|*.cjs` (spisak `SCRIPTS`) | logovi (`*.log`), `.bak-*`, screenshots |
-| `dsh/<plugin>/` (oba lokalna plugina) | `node_modules`, `__pycache__`, `.zip` |
-| `tests/*.mjs`, `tests/*.py` | |
-| `bin/dsh-termux`, `profile/*`, `dsh-home/AGENTS.md`, `skills/*` | |
+- U arhivi: `bash restore.sh --dry-run` (samo prijava) pa `bash restore.sh`.
+- Vraća u `~/dsh` skripte, `rules/`, dokumentaciju i pluginove; u profil
+  `package.json` + `cordis.patch.yml`; u `~/.local/bin` launcher; u `~/.dsh`
+  `AGENTS.md` i `skills/*`. Tajne se unose ručno (korak 9).
+- Idempotentan je: pravi `.bak-<timestamp>` samo za fajl koji se stvarno menja.
+- Za samo vraćanje `~/dsh` skripti i zakrpa (bez promene verzije):
+  `bash ~/dsh/restore-patches.sh` — traži `DSH-Restore/dsh`, a razume i stari
+  `DSH-Restore-<datum>`.

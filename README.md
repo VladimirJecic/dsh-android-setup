@@ -2,9 +2,11 @@
 
 DSH (**DeepSeek Harness**) na Termuxu / Androidu — restore arhiva i pravila setup-a.
 
-Ovo je git ogledalo foldera **`DSH-Restore-20261007`** sa telefona
-(`/storage/emulated/0/Download/DSH-Restore-20261007`) i služi da se setup vrati
-posle reinstalacije / brisanja `~/.dsh`, i da pravila budu na jednom mestu.
+Ovo je git ogledalo foldera **`DSH-Restore`** sa telefona
+(`/storage/emulated/0/Download/DSH-Restore`) i služi da se setup vrati posle
+reinstalacije / brisanja `~/.dsh`, i da pravila budu na jednom mestu. Folder
+**nema datum** — repo se osvežava u mestu (`bash ~/dsh/make-restore-archive.sh`),
+pa datum u imenu više ne služi ničemu (arhiva se ne deli preko Drive-a).
 
 ## Gde šta piše
 

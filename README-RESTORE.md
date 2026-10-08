@@ -1,6 +1,7 @@
-# DSH Termux — restore arhiva (folder 2026-10-07, sadržaj osvežen 2026-10-08)
+# DSH Termux — restore arhiva (`DSH-Restore`, bez datuma)
 
-> Arhiva je osvežena **2026-10-07** (datum joj je u imenu foldera):
+> Arhiva je **jedan folder bez datuma** — `/storage/emulated/0/Download/DSH-Restore`
+> (i git repo; osvežava se u mestu, pa joj datum u imenu ne treba):
 > **ujedinjen restart** (jedina komanda `restart-dsh`, skill + GUI komanda nad
 > istim skriptom; ukinut dupli `/restart`), **prazna nova sesija (`+`) je
 > ponovo smart po defaultu** (postojeći razgovori nisu), dodat je
@@ -58,8 +59,8 @@ Ručna provera: `python3 ~/dsh/patch-android-dsh.py --check`
 pkg install nodejs python ripgrep -y
 
 # 2. vrati setup iz arhive (restore.sh sam instalira dsh 0.2.0-rc.2 ako ga nema)
-bash ~/storage/shared/Download/DSH-Restore-20261007/restore.sh --dry-run   # pogledaj
-bash ~/storage/shared/Download/DSH-Restore-20261007/restore.sh             # primeni
+bash ~/storage/shared/Download/DSH-Restore/restore.sh --dry-run   # pogledaj
+bash ~/storage/shared/Download/DSH-Restore/restore.sh             # primeni
 
 # 3. unesi tajne (vidi korak 9 ispod)
 
@@ -230,20 +231,31 @@ dozvoljeno pisanje; na Termuxu `/tmp` obično nije naš (mode 0731), pa se koris
 Poslednji backup ostaje, pointer na njega je `<global-root>/.dsh-backup-latest`.
 
 Ako treba samo vratiti `~/dsh` skripte i zakrpe (bez promene verzije):
-`bash ~/dsh/restore-patches.sh` — **sam nađe najnoviju arhivu** u
-`~/storage/shared/Download`.
+`bash ~/dsh/restore-patches.sh` — **sam nađe arhivu** u
+`~/storage/shared/Download` (`DSH-Restore`, a razume i stari `DSH-Restore-<datum>`).
 
-## Pakovanje nove arhive (posle svake promene setup-a)
+## Osvežavanje arhive (posle svake promene setup-a)
 
 ```bash
-bash ~/dsh/make-restore-archive.sh          # datum = danas; folder + .zip
+bash ~/dsh/make-restore-archive.sh          # osveži folder + .zip
 SHARE=1 bash ~/dsh/make-restore-archive.sh  # + Android share sheet
-NOZIP=1 bash ~/dsh/make-restore-archive.sh  # samo folder
+NOZIP=1 bash ~/dsh/make-restore-archive.sh  # samo folder (bez .zip)
 ```
 
-Uzme žive fajlove, prepiše ime arhive u putanjama (stari datum → novi, i u
-`~/dsh` i u arhivi), očisti `__pycache__`/`*.bak-*` i spakuje `.zip`
-(python `zipfile` — `zip` na Termuxu nije instaliran).
+- Arhiva je **jedan folder bez datuma** (`/storage/emulated/0/Download/DSH-Restore`)
+  i **git repo**, pa se osvežava **u mestu** — nema više kopiranja prethodne
+  arhive, ni prepisivanja datuma u putanjama, ni „novi datum = novi folder".
+- Sadržaj je **100% izveden iz živog sistema**: obriše se sve osim `.git`, pa se
+  ponovo napuni iz `~/dsh` (+ `~/dsh/restore`, `~/dsh/rules`, `~/dsh/tests`),
+  `~/.dsh` (profil, `AGENTS.md`, skills) i `~/.local/bin/dsh-termux`. Zato
+  **obrisan fajl nestaje i iz arhive**, a svako pokretanje daje isto stanje.
+- Bazni fajlovi arhive (`restore.sh`, `README.md`, `README-RESTORE.md`,
+  `.gitignore`) žive u **`~/dsh/restore/`** — tu ih menjaj, ne u arhivi.
+- `.zip` (`DSH-Restore.zip`) je samo prenosivi snapshot (bez `.git`), za share
+  sheet; istorija i remote žive u git-u.
+- Objava: `cd /storage/emulated/0/Download/DSH-Restore && git add -A && git commit -m '…' && git push`.
+  Skript na kraju ispiše `git status --short`, pa se odmah vidi šta se promenilo.
+  Puna pravila: `~/dsh/rules/07-restore-i-git.md`.
 
 ## Redosled pokretanja (važno)
 

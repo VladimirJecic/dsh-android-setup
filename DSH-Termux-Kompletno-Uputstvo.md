@@ -14,8 +14,8 @@ Uz ovaj fajl ide `restore.sh` (isti folder) koji izvodi sve korake automatski i
 idempotentan je — bezbedno ga je pokrenuti više puta:
 
 ```bash
-bash ~/storage/shared/Download/DSH-Restore-20261007/restore.sh --dry-run  # pogledaj šta bi uradio
-bash ~/storage/shared/Download/DSH-Restore-20261007/restore.sh            # primeni
+bash ~/storage/shared/Download/DSH-Restore/restore.sh --dry-run  # pogledaj šta bi uradio
+bash ~/storage/shared/Download/DSH-Restore/restore.sh            # primeni
 ```
 
 Skripta nikad ne dira `~/.dsh/.credentials.yaml` — API ključ unosiš sam kroz dsh UI.
@@ -28,11 +28,11 @@ Skripta nikad ne dira `~/.dsh/.credentials.yaml` — API ključ unosiš sam kroz
 > **Kanonski put danas:**
 >
 > ```bash
-> bash ~/storage/shared/Download/DSH-Restore-20261007/restore.sh   # ceo setup
+> bash ~/storage/shared/Download/DSH-Restore/restore.sh   # ceo setup
 > bash ~/dsh/restore-patches.sh                                   # skripte + Android zakrpe
 > ```
 >
-> `restore-patches.sh` čita skripte iz arhive (`DSH-Restore-20261007/dsh/`) i
+> `restore-patches.sh` čita skripte iz arhive (`DSH-Restore/dsh/`) i
 > ponovo primenjuje zakrpe; ne dira tajne. Update samog dsh-a je
 > **isključivo ručni**: `~/dsh/dsh-update.sh`.
 
@@ -1279,7 +1279,7 @@ Sve staro je **obrisano** (2026-09-29) — nema „prikolica":
   `flock_shim.c/.so` — obrisani.
 - labave kopije na deljenom storage-u (stara skripta, `dsh-termux`,
   `dsh-termux.txt`, `dsh-update.sh`, `compat-scan.mjs`) — obrisane;
-  **jedini izvor istine je arhiva `DSH-Restore-20261007`**.
+  **jedini izvor istine je arhiva `DSH-Restore`** (folder bez datuma, git repo).
 - stari instalateri `dsh-termux-install.py` i `dsh-termux-install_fixed.py`
   (i kopija u Markor folderu) — obrisani; kanonski put je `restore.sh` iz
   arhive, odn. `~/dsh/restore-patches.sh` za skripte + zakrpe.

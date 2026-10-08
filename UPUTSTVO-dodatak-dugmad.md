@@ -36,11 +36,11 @@ Server radi `lstat` (ne prati symlink), **neprazan folder odbija**, vraća rezul
 
 ## 4. Vraćanje plugina iz arhive
 
-Iz `DSH-Restore-20261007` (najnovija arhiva u `~/storage/shared/Download`):
+Iz `DSH-Restore` (arhiva u `~/storage/shared/Download`, bez datuma od 2026-10-08):
 
 ```bash
 # cela obnova (profil, skripte, plugini, skills) — pita za tajne
-bash /storage/emulated/0/Download/DSH-Restore-20261007/restore.sh
+bash /storage/emulated/0/Download/DSH-Restore/restore.sh
 
 # samo zakrpe + ~/dsh skripte (sam nađe najnoviju arhivu)
 bash ~/dsh/restore-patches.sh --check   # pregled
