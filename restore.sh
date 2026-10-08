@@ -106,7 +106,7 @@ do_run "mkdir -p '$H/dsh'"
 DSH_FILES="patch-android-dsh.py gemini-catalog-update.py dsh-rescue.sh dsh-update.sh \
 compat-scan.mjs dsh-url.sh no-hardlink.cjs restore-patches.sh cache-report.py \
 session-turn-state.py resume-after-restart.sh preset-compaction-sync.py \
-make-restore-archive.sh .restart-after-update.sh"
+make-restore-archive.sh edge-download-bridge.sh .restart-after-update.sh"
 for f in $DSH_FILES; do
   [ -f "$SRC/dsh/$f" ] || { note "nema u arhivi: $f"; continue; }
   copy_in "$SRC/dsh/$f" "$H/dsh/$f"
@@ -146,6 +146,30 @@ if grep -qF "$MARKER" "$H/.bashrc" 2>/dev/null; then
 else
   do_run "printf '\n%s\n' '$MARKER' >> '$H/.bashrc'"
   good "dodata bash funkcija 'dsh'"
+fi
+say
+
+say "3b. Edge -> Download bridge (Shizuku)"
+# Skripta je već vraćena u ~/dsh (korak 1); ovde se pravi komanda u PATH-u,
+# hook u ~/.bashrc i (ako ima Termux:API) trajni JobScheduler posao.
+do_run "mkdir -p '$H/bin'"
+do_run "ln -sfn '$H/dsh/edge-download-bridge.sh' '$H/bin/edge-bridge'"
+good "~/bin/edge-bridge -> ~/dsh/edge-download-bridge.sh"
+
+BRIDGE_HOOK='\n# Edge -> Download bridge: auto-start watcher (idempotentno preko\n# ~/.edge-bridge.pid; ako Shizuku nije pokrenut, skripta samo preskoči).\nif [ -x "$HOME/bin/edge-bridge" ]; then\n  "$HOME/bin/edge-bridge" --watch 60 >/dev/null 2>&1 &\nfi\n'
+if grep -qF 'edge-bridge" --watch 60' "$H/.bashrc" 2>/dev/null; then
+  good "Edge bridge hook već u ~/.bashrc"
+else
+  do_run "printf '$BRIDGE_HOOK' >> '$H/.bashrc'"
+  good "dodat Edge bridge hook u ~/.bashrc"
+fi
+
+# Posao preživi reboot; i on traži Shizuku (rish) da bi čitao Android/data.
+if command -v termux-job-scheduler >/dev/null 2>&1; then
+  do_run "termux-job-scheduler --script '$H/dsh/edge-download-bridge.sh' --job-id 4242 --period-ms 900000 --network none --battery-not-low false --persisted true"
+  good "JobScheduler: edge bridge svakih 15 min (job 4242)"
+else
+  note "nema termux-job-scheduler (Termux:API) — bridge tada radi samo preko watchera"
 fi
 say
 

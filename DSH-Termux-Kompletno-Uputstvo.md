@@ -1598,3 +1598,77 @@ mora da prođe njegov install script.
 - Nova verzija se aktivira **tek posle restarta** dsh-a (živi proces drži staru;
   rename je bezbedan jer otvoreni inode ostaje).
 
+
+# AŽURIRANJA — 2026-10-08 (Edge → Download bridge preko Shizuku-a)
+
+## A. Problem: Edge skida „u sebe"
+
+Microsoft Edge za Android (Chromium) **ne piše u javni `Download`**, nego u
+svoju app-privatnu fasciklu:
+
+```
+/storage/emulated/0/Android/data/com.microsoft.emmx/files/Download/
+```
+
+Fajlovi dobiju prefiks datuma (`2026_10_08_<naziv>`), a u Files/galeriji ih
+**nema** — vide se samo u Edge → Downloads. Edge **nema podešavanje za download
+folder**, a Termux bez root-a ne može da pročita `Android/data` (scoped storage,
+Android 11+): `ls` na tu putanju daje `Permission denied`.
+
+## B. Rešenje: `edge-bridge`
+
+Skripta `~/dsh/edge-download-bridge.sh` (komanda **`edge-bridge`** preko
+symlinka u `~/bin/`) ide preko **Shizuku-a** (`~/rish`, uid=shell), pročita Edge
+fasciklu, prebaci sve u `/storage/emulated/0/Download`, pokrene
+`termux-media-scan` (da se fajl odmah vidi) i pošalje notifikaciju.
+
+```bash
+edge-bridge              # jedan prolaz (odmah prebaci sve)
+edge-bridge --status     # Shizuku + Edge fascikla + watcher + zadnjih 15 log linija
+edge-bridge --watch 60   # petlja na 60s
+edge-bridge --stop       # zaustavi petlju
+```
+
+Log: `~/.edge-bridge.log` · PID: `~/.edge-bridge.pid`
+
+## C. Instalacija (šta je već urađeno)
+
+1. **Shizuku** (`moe.shizuku.privileged.api`): `Start` → *Start via Wireless
+   debugging* → u Developer options uključi **Wireless debugging** → *Pair
+   device with pairing code* → ukucaj kod u Shizuku.
+2. Skripta je u `~/dsh/` i navedena u `SCRIPTS` (`make-restore-archive.sh`),
+   `DSH_FILES` (`restore.sh`) i `FILES` (`restore-patches.sh`).
+3. `~/bin/edge-bridge` → symlink na skriptu (u PATH-u preko `~/bin`).
+4. Hook u `~/.bashrc` diže watcher (60s) pri svakom otvaranju Termuxa;
+   duplo pokretanje sprečava PID fajl.
+5. **JobScheduler** posao `4242` (svakih 15 min, `persisted=true`) — radi i kad
+   Termux nije otvoren:
+
+```bash
+termux-job-scheduler --script ~/dsh/edge-download-bridge.sh --job-id 4242 \
+  --period-ms 900000 --network none --battery-not-low false --persisted true
+```
+
+## D. Ponašanje posle reboota
+
+Reboot **gasi Shizuku** (bez root-a se ne diže sam) → bridge samo zapiše
+`SKIP: Shizuku (rish) nije pokrenut` i **ne dira ništa**. Ništa se ne gubi: čim
+se Shizuku ponovo pokrene, prvi ciklus prebaci **sve nagomilano** (skripta ne
+gleda „novo", nego celo stanje fascikle).
+
+Ako ti se ne pokreće Shizuku svaki put: skidaj kroz Chrome/Firefox (pišu
+direktno u javni `Download`), ili u Edge-u posle skidanja ⋯ → Share → sačuvaj u
+Downloads.
+
+## E. Zamke (dokazano)
+
+- **`rish` ne propagira exit kod** (uvek 0) → u skripti se koristi sentinel
+  `__OK__`, ne `$?`; izlaz ume da završi i na `stderr`, pa se hvata `2>&1`.
+- **`rish` čita stdin** → obavezno `</dev/null`, inače „pojede" ostatak
+  `while read` petlje i obradi samo prvi fajl.
+- **Ne diraj Edge fasciklu** (brisanje / symlink na javni `Download`): Edge tamo
+  piše običnim file I/O-om, a symlink na FUSE-u + scoped storage bi slomio
+  download.
+- Duplikat imena se ne prepisuje — dobije ` (1)`, ` (2)` …
+
+Pravila i odluke: `~/dsh/rules/09-edge-download-bridge.md`.

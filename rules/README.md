@@ -40,6 +40,7 @@ lokalni pluginovi **`dsh-composer-extras`** i **`dsh-chat-jump-arrows`**.
 | [`06-pluginovi.md`](06-pluginovi.md) | naša dva plugina: šta smeju, seatovi, `data-dsh-overlay-surface` | menjaš plugin ili praviš novu overlay površinu |
 | [`07-restore-i-git.md`](07-restore-i-git.md) | arhiva, `make-restore-archive.sh`, `restore.sh`, git repo i push | pakuješ/obnavljaš arhivu, komituješ |
 | [`08-tajne.md`](08-tajne.md) | API ključevi, `.credentials.yaml`, PWA cookie | diraš ključeve ili auth |
+| [`09-edge-download-bridge.md`](09-edge-download-bridge.md) | Edge download → javni `Download` preko Shizuku-a | diraš bridge, `rish` ili Shizuku |
 
 ## Kako se ovaj folder održava
 

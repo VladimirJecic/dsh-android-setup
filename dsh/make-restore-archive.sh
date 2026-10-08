@@ -89,6 +89,7 @@ SCRIPTS=(
 	dsh-rescue.sh dsh-url.sh no-hardlink.cjs restore-patches.sh
 	cache-report.py session-turn-state.py resume-after-restart.sh
 	preset-compaction-sync.py make-restore-archive.sh
+	edge-download-bridge.sh
 	.restart-after-update.sh
 )
 missing=0

@@ -31,7 +31,7 @@ DEST="$HOME/dsh"
 # (Ostale fajlove iz ~/dsh vraca `restore.sh` iz korena arhive.)
 FILES="patch-android-dsh.py gemini-catalog-update.py dsh-rescue.sh dsh-update.sh compat-scan.mjs \
 no-hardlink.cjs dsh-url.sh cache-report.py session-turn-state.py resume-after-restart.sh \
-.restart-after-update.sh make-restore-archive.sh"
+.restart-after-update.sh make-restore-archive.sh edge-download-bridge.sh"
 CHECK=0
 [ "${1:-}" = "--check" ] && CHECK=1
 
