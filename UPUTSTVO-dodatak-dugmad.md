@@ -58,4 +58,4 @@ i pravi symlink `~/.dsh/profiles/node_modules/dsh-composer-extras -> ~/dsh/dsh-c
 ## 5. Poznato / istorija
 
 - 2026-09-29: `android-folder` je pucao sa `dirname is not defined` (u `index.js` je korišćen `dirname` bez import-a). Popravljeno na `path.dirname(target)`. Za primenu u živom serveru treba **restart dsh**.
-- 2026-10-06: dsh prešao na **0.2.0-rc.2** (vidi `SANDBOX-DOKAZ-0.2.0-rc.2.md`); plugin i sve zakrpe rade nepromenjeno, `sidebar.right.tab.document.actions` i `conversation.input.left` slotovi postoje i u 0.2.0.
+- 2026-10-06: dsh prešao na **0.2.0-rc.2** (vidi odeljak „AŽURIRANJA — 2026-10-06" u `DSH-Termux-Kompletno-Uputstvo.md`); plugin i sve zakrpe rade nepromenjeno, `sidebar.right.tab.document.actions` i `conversation.input.left` slotovi postoje i u 0.2.0.

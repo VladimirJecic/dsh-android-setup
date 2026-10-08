@@ -98,6 +98,31 @@ window.__ModuleLoader__.load({
 		/** Cheap safety net: the scrollport can be replaced while a session loads. */
 		var RESCAN_MS = 1000;
 
+		/**
+		 * A surface that has taken the screen over, and therefore owns every tap.
+		 *
+		 * Two halves, both contracts rather than guesses:
+		 *   • DSH's own dialogs and menus — the same selector the primitives
+		 *     publish as `modalSelector` and the shortcuts plugin gates on
+		 *     (`[role="dialog"][aria-modal="true"], [role="menu"]`);
+		 *   • overlays of mine — `dsh-composer-extras` marks every full-screen
+		 *     surface it puts up (`data-dsh-overlay-surface="file-picker"` on the
+		 *     "Dodaj u kontekst" picker), because that picker is a plain fixed
+		 *     div: it is NOT a `role="dialog"`, so the contract above cannot see
+		 *     it.
+		 *
+		 * Why the arrows must yield completely while one is open: the seat is
+		 * `shell.overlay`, which stacks ABOVE the composer region, so a
+		 * `z-index: 10000` inside the picker still loses — the chevrons end up
+		 * floating on top of the picker card and swallow the taps meant for it
+		 * (2026-10-08: the 🗑️ in the picker became hard to hit, and a swipe
+		 * over the card scrolled the transcript behind it instead). The picker
+		 * also mounts into a portal outside the transcript, which is why the
+		 * transcript observer alone never noticed it.
+		 */
+		var OVERLAY_SELECTOR =
+			'[role="dialog"][aria-modal="true"],[role="menu"],[data-dsh-overlay-surface]';
+
 		var BADGE_TEXT_FONT = 10;
 
 		/** requestAnimationFrame with a timeout fallback for hidden tabs. */
@@ -126,6 +151,46 @@ window.__ModuleLoader__.load({
 				}
 			}
 			return "smooth";
+		}
+
+		/**
+		 * Whether one candidate overlay is really on screen.
+		 *
+		 * A menu left mounted but `display: none` (DSH renders menus in portals
+		 * and normally unmounts them, but a stale node would be invisible while
+		 * still matching the selector) must not keep the arrows hidden forever,
+		 * so only an element with a laid-out box counts.
+		 * @param el - candidate element.
+		 * @returns true when the element occupies layout.
+		 */
+		function overlaySurfaceRendered(el) {
+			if (el === null || el === undefined) return false;
+			if (el.hidden === true) return false;
+			if (typeof el.hasAttribute === "function" && el.hasAttribute("hidden")) return false;
+			if (el.attributes !== undefined && el.attributes !== null && el.attributes.hidden !== undefined) return false;
+			if (typeof el.getClientRects === "function" && el.getClientRects().length === 0) return false;
+			return true;
+		}
+
+		/**
+		 * Whether some foreground surface is open right now.
+		 * @param doc - document to inspect.
+		 * @returns true when a dialog, menu, or marked overlay owns the screen.
+		 */
+		function overlaySurfaceOpen(doc) {
+			if (doc === null || doc === undefined || typeof doc.querySelectorAll !== "function") return false;
+			var found;
+			try {
+				found = doc.querySelectorAll(OVERLAY_SELECTOR);
+			} catch (error) {
+				// A document without selector support must never break the arrows.
+				return false;
+			}
+			if (found === null || found === undefined) return false;
+			for (var i = 0; i < found.length; i++) {
+				if (overlaySurfaceRendered(found[i])) return true;
+			}
+			return false;
 		}
 
 		/**
@@ -346,6 +411,10 @@ window.__ModuleLoader__.load({
 		 */
 		function computeState(container) {
 			if (container === null || container === undefined) return HIDDEN_STATE;
+			// A picker/dialog owns the screen: the arrows must not be drawn at
+			// all, or they sit on top of it and eat its taps (see
+			// OVERLAY_SELECTOR).
+			if (overlaySurfaceOpen(document)) return HIDDEN_STATE;
 			var rows = collectMyRows(container);
 			if (rows.length === 0) return HIDDEN_STATE;
 			var viewport = container.getBoundingClientRect();
@@ -484,6 +553,7 @@ window.__ModuleLoader__.load({
 				var observer = null;
 				var resizeObserver = null;
 				var bound = null;
+				var layerObserver = null;
 				var interval = 0;
 
 				function publish(next) {
@@ -542,12 +612,29 @@ window.__ModuleLoader__.load({
 				}
 
 				scan();
+				// A picker/dialog mounts into a portal OUTSIDE the transcript,
+				// so the container observer cannot see it open or close. Only
+				// the attributes that can mark a foreground surface are watched,
+				// never text — streaming output must not wake this up.
+				if (typeof MutationObserver === "function" && document.documentElement) {
+					layerObserver = new MutationObserver(schedule);
+					layerObserver.observe(document.documentElement, {
+						childList: true,
+						subtree: true,
+						attributes: true,
+						attributeFilter: ["role", "aria-modal", "data-dsh-overlay-surface"]
+					});
+				}
 				interval = window.setInterval(scan, RESCAN_MS);
 				window.addEventListener("resize", schedule);
 				window.addEventListener("orientationchange", schedule);
 				return function () {
 					live = false;
 					unbind();
+					if (layerObserver !== null) {
+						layerObserver.disconnect();
+						layerObserver = null;
+					}
 					window.clearInterval(interval);
 					window.removeEventListener("resize", schedule);
 					window.removeEventListener("orientationchange", schedule);
@@ -621,6 +708,7 @@ window.__ModuleLoader__.load({
 		/** Internal seams for the offline harness in ~/dsh/tests. */
 		exports.__test__ = {
 			computeState: computeState,
+			overlaySurfaceOpen: overlaySurfaceOpen,
 			collectMyRows: collectMyRows,
 			findScrollport: findScrollport,
 			activeRowIndex: activeRowIndex,

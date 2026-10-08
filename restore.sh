@@ -105,15 +105,14 @@ say "1. ~/dsh skripte"
 do_run "mkdir -p '$H/dsh'"
 DSH_FILES="patch-android-dsh.py gemini-catalog-update.py dsh-rescue.sh dsh-update.sh \
 compat-scan.mjs dsh-url.sh no-hardlink.cjs restore-patches.sh cache-report.py \
-session-turn-state.py resume-after-restart.sh run-headless-buttons.sh make-restore-archive.sh \
-.restart-after-update.sh .smart-start-test.sh .smart-test-prompt.md .restart-branch-route.sh \
-.restart-for-branchinfo.sh .restart-plugin-fix.sh .restart-when-idle.sh"
+session-turn-state.py resume-after-restart.sh preset-compaction-sync.py \
+make-restore-archive.sh .restart-after-update.sh"
 for f in $DSH_FILES; do
   [ -f "$SRC/dsh/$f" ] || { note "nema u arhivi: $f"; continue; }
   copy_in "$SRC/dsh/$f" "$H/dsh/$f"
   do_run "chmod 700 '$H/dsh/$f'"
 done
-for f in DSH-Termux-Kompletno-Uputstvo.md DIJAGNOZA-gemini-deepseek-tool-use.md; do
+for f in DSH-Termux-Kompletno-Uputstvo.md PRAVILA-DSH.md UPUTSTVO-strelice.md UPUTSTVO-dodatak-dugmad.md; do
   [ -f "$SRC/$f" ] && copy_in "$SRC/$f" "$H/dsh/$f"
 done
 say
@@ -226,7 +225,7 @@ if [ "$DRY" != 1 ]; then
   say
   say "  Vazno za 0.2.x: `npm install -g` sam NE prolazi (koffi bez android"
   say "  prebuild-a). dsh-update.sh faze 4b/4c to resavaju — detalji:"
-  say "  SANDBOX-DOKAZ-0.2.0-rc.2.md i README-RESTORE.md."
+  say "  README-RESTORE.md i sam dsh-update.sh (--dry-run)."
   say
   say "11. AKTIVACIJA posle update-a (novu verziju ucitava NOVI proces)"
   say "  restart preko launcher-a:"

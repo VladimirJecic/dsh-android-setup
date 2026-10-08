@@ -77,6 +77,112 @@ window.__ModuleLoader__.load({
 		var useRef = react.useRef;
 		var useSyncExternalStore = react.useSyncExternalStore;
 
+		/**
+		 * Modal (ContextGuard) ide kroz `createPortal` u `document.body`, isto
+		 * kao core `SettingsPanel` (dsh-client-ui-settings-general). Razlog je
+		 * konkretan bug od 2026-10-08: kartica je bila `position: fixed` UNUTAR
+		 * slota u composeru, pa je ispadala uz desnu ivicu i sekla se umesto da
+		 * bude na sredini ekrana. U portalu je `fixed` vezan za viewport, ne za
+		 * pretke composera (transform/filter/overflow na pretku bi inače
+		 * napravio novi containing block).
+		 *
+		 * Ako `react-dom` iz nekog razloga nije u module table-u, vraća se
+		 * identitet — panel se i dalje renderuje (samo inline), nikad ne puca.
+		 */
+		var modalPortal = (function () {
+			try {
+				var reactDom = require("react-dom");
+				if (reactDom !== undefined && reactDom !== null && typeof reactDom.createPortal === "function") {
+					return function (node) {
+						var target = typeof document !== "undefined" && document && document.body
+							? document.body
+							: null;
+						if (target === null) return node;
+						return reactDom.createPortal(node, target);
+					};
+				}
+			} catch (error) {
+				/* bez portala — panel i dalje radi, samo inline */
+			}
+			return function (node) { return node; };
+		})();
+
+		/**
+		 * GDE stoji mali pill („📦 Kontekst N%") koji ostaje posle odbacivanja
+		 * predloga za kompakciju.
+		 *
+		 * 2026-10-08: pill je bio `position: fixed; right: 12; bottom: 96` i na
+		 * telefonu je seo preko reda sa dugmadima composera. Korisnik je tražio:
+		 * „pomeri floating window dole levo ispod plus dugmeta … opcija za
+		 * compact bi bila u praznom prostoru ispod umesto sa strane".
+		 *
+		 * Taj prazan prostor je UNUTAR composer kartice (`[data-composer-card]`)
+		 * i postoji zato što se red sa dugmadima na telefonu LOMI u dva reda:
+		 * prvi red = `tools` (tu je levo „+"), drugi red = samo `trailing`
+		 * (model + posalji) uz desnu ivicu — pa leva polovina drugog reda, tačno
+		 * ispod „+", ostaje prazna. Zato se pozicija MERI iz DOM-a, umesto da se
+		 * pogodi brojem:
+		 *   1. ima li mesta ispod „+" unutar kartice → pill ide tačno tamo
+		 *      (levo poravnat sa „+", `left` = leva ivica tog dugmeta);
+		 *   2. ako nema (širok ekran — red se ne lomi) → pill ide u prazan levi
+		 *      deo dock trake na dnu ekrana (ispod kartice, uz levu ivicu) i tu
+		 *      ne dira ni jednu ikonicu.
+		 *
+		 * Selektori: kartica je `[data-composer-card]` (core InputBar), a „+" je
+		 * jedino dugme u njoj sa `aria-haspopup="listbox"` (meni komandi) — isti
+		 * atributi koje core sam postavlja, pa nema zavisnosti od heširanih CSS
+		 * klasa (`.uV2eYG_add` se menja pri svakom build-u).
+		 *
+		 * Bez DOM-a (test harness, prvi render pre `useEffect`-a) vraća `null`, a
+		 * pill tada koristi statični fallback (levo/dole) — nikad desnu ivicu.
+		 */
+		function useComposerPillAnchor(enabled) {
+			var state = useState(null);
+			var anchor = state[0], setAnchor = state[1];
+			useEffect(function () {
+				if (!enabled) return undefined;
+				if (typeof document === "undefined" || document === null) return undefined;
+				if (typeof document.querySelector !== "function") return undefined;
+				var measure = function () {
+					var card = document.querySelector("[data-composer-card]");
+					if (card === null || typeof card.getBoundingClientRect !== "function") {
+						setAnchor(null);
+						return;
+					}
+					var cardBox = card.getBoundingClientRect();
+					var plus = typeof card.querySelector === "function"
+						? card.querySelector('button[aria-haspopup="listbox"]')
+						: null;
+					var plusBox = plus !== null && typeof plus.getBoundingClientRect === "function"
+						? plus.getBoundingClientRect()
+						: cardBox;
+					var top = Math.round(plusBox.bottom + 4);
+					var room = Math.round(cardBox.bottom - CONTEXT_GUARD_PILL_HEIGHT - 4);
+					if (top > room) {
+						var viewport = typeof window !== "undefined" && window !== null && window.innerHeight
+							? window.innerHeight
+							: cardBox.bottom;
+						setAnchor({ left: 16, top: Math.round(viewport - CONTEXT_GUARD_PILL_HEIGHT - 4) });
+						return;
+					}
+					setAnchor({ left: Math.max(8, Math.round(plusBox.left)), top: top });
+				};
+				measure();
+				if (typeof window !== "undefined" && window !== null && typeof window.addEventListener === "function") {
+					// Composer se pomera pri promeni visine prozora i pri skrolu
+					// (sticky traka na dnu), pa se mesto ponovo meri.
+					window.addEventListener("resize", measure);
+					window.addEventListener("scroll", measure, true);
+					return function () {
+						window.removeEventListener("resize", measure);
+						window.removeEventListener("scroll", measure, true);
+					};
+				}
+				return undefined;
+			}, [enabled]);
+			return anchor;
+		}
+
 		// `uiWorkspace` se NAMERNO ne dodaje u `inject`: to je tvrd zahtev, pa bi
 		// nedostupan servis oborio ceo plugin (i postojeća dugmad). Čita se
 		// lenjo kroz `ctx.get("uiWorkspace")` — isti obrazac koji ovaj plugin već
@@ -101,17 +207,37 @@ window.__ModuleLoader__.load({
 		var CONTEXT_GUARD_TOKENS = 500000;
 
 		/**
-		 * Guard se pali na MANJE od dva praga: apsolutnog (500k) ili ovog dela
-		 * prozora modela. Za 1M prozor to je 400k umesto 500k — bez ovoga se na
-		 * velikim prozorima podsetnik (i njegovo dugme „Compact session") pojavi
-		 * tek na pola, iako korisnik tada već ima problem koji je hteo da reši.
-		 * 2026-10-07: sesija od ~250k tokena nije dobila nikakav compact prečicu
-		 * jer je prag bio 500k.
+		 * Guard se pali na MANJE od dva praga: apsolutnog
+		 * (`CONTEXT_GUARD_TOKENS`) ili ovog dela prozora modela.
+		 *
+		 * 0.5 (50%) je JEDINA vrednost u upotrebi — korisnik je 2026-10-08
+		 * izričito tražio: „updejtuj da ga ne vidim ispod 50%". Niže vrednosti
+		 * (0.25 i 0.05) su istog dana koristile SAMO kao privremeni test da se
+		 * novi modal vidi odmah; vraćene su na 0.5 i ne spuštaju se više.
+		 * Ako se modal ikad bude testirao, koristi `panel-preview.html`, a NE
+		 * spuštanje praga (vidi PRAVILA-DSH.md §13).
+		 *
+		 * Sa 1M prozorom: prag = min(500.000, 1.000.000 × 0.5) = 500.000 (50%).
+		 *
+		 * Guard je SAMO predlog: auto-compact je isključen (`auto: false` u
+		 * `~/.dsh/profiles/web/cordis.patch.yml`), pa kompakciju uvek odobrava
+		 * korisnik klikom na „Compact session".
 		 */
-		var CONTEXT_GUARD_WINDOW_FRACTION = 0.4;
+		var CONTEXT_GUARD_WINDOW_FRACTION = 0.5;
 
-		/** Posle odbacivanja podsećaj ponovo svakih ovoliko tokena iznad praga. */
-		var CONTEXT_GUARD_RENUDGE = 250000;
+		/**
+		 * Posle odbacivanja („Nastavi dalje") podsetnik se vraća na sledećih
+		 * ovoliko tokena iznad praga. 100k je 10% prozora od 1M — podsetnik se
+		 * ponavlja na 60%, 70%, 80%…
+		 */
+		var CONTEXT_GUARD_RENUDGE = 100000;
+
+		/**
+		 * Približna visina pill-a u pikselima. Koristi je samo merenje u
+		 * `useComposerPillAnchor` (da pill ne pređe preko donje ivice composer
+		 * kartice). Ne mora da bude tačna do piksela.
+		 */
+		var CONTEXT_GUARD_PILL_HEIGHT = 26;
 
 		/**
 		 * localStorage ključ: najviši odbačeni „opseg" za tu sesiju.
@@ -1753,6 +1879,13 @@ window.__ModuleLoader__.load({
 			}
 
 			return createElement("div", {
+				// Ugovor sa `dsh-chat-jump-arrows`: svaka moja površina koja
+				// preuzme ceo ekran mora da se označi, jer `shell.overlay`
+				// (sloj strelica) stoji IZNAD composera, pa ga `zIndex: 10000`
+				// odavde ne može da nadjača — strelice bi lebdele preko
+				// pickera i kradle dodire (vidi 2026-10-08: teško se klikne
+				// 🗑️ dok su strelice preko pickera).
+				"data-dsh-overlay-surface": "file-picker",
 				style: {
 					position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
 					display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000,
@@ -2170,6 +2303,28 @@ window.__ModuleLoader__.load({
 					: (session ? session.sessionId : undefined);
 				var useProjection = props.useProjection;
 
+				// Standard kit za session-scope slotove (ui-session ga spaja u
+				// SessionStandardProps). `typeof` je stabilan kroz render-e, pa
+				// redosled hookova ostaje nepromenjen.
+				var pressure = typeof useProjection === "function" ? useProjection("contextPressure") : undefined;
+				var occupancy = contextOccupancyFrom(pressure);
+
+				// SVE izvedeno se računa PRE hookova i pre svakog `return null`:
+				// React zahteva isti broj hookova u svakom renderu, pa rani
+				// `return` ispred `useEffect` baca „Rendered fewer hooks than
+				// expected" čim sesija pređe prag (ili padne ispod njega).
+				// Manji od dva praga: apsolutnog (500k) i dela prozora modela.
+				var guardTokens = occupancy === null
+					? Number.POSITIVE_INFINITY
+					: Math.min(
+						CONTEXT_GUARD_TOKENS,
+						Math.round(occupancy.window * CONTEXT_GUARD_WINDOW_FRACTION));
+				var above = sessionId !== undefined && occupancy !== null && occupancy.used >= guardTokens;
+				var band = above
+					? Math.floor((occupancy.used - guardTokens) / CONTEXT_GUARD_RENUDGE)
+					: 0;
+				var dismissed = above && band <= contextDismissedBand(sessionId);
+
 				var tickState = useState(0);
 				var setTick = tickState[1];
 				var busyState = useState("");
@@ -2177,26 +2332,94 @@ window.__ModuleLoader__.load({
 				var noteState = useState("");
 				var note = noteState[0], setNote = noteState[1];
 
-				// Standard kit za session-scope slotove (ui-session ga spaja u
-				// SessionStandardProps). `typeof` je stabilan kroz render-e, pa
-				// redosled hookova ostaje nepromenjen.
-				var pressure = typeof useProjection === "function" ? useProjection("contextPressure") : undefined;
-				var occupancy = contextOccupancyFrom(pressure);
-
-				if (sessionId === undefined || occupancy === null) return null;
-				// Manji od dva praga: apsolutnog (500k) i dela prozora modela.
-				var guardTokens = Math.min(
-					CONTEXT_GUARD_TOKENS,
-					Math.round(occupancy.window * CONTEXT_GUARD_WINDOW_FRACTION));
-				if (occupancy.used < guardTokens) return null;
-
-				var band = Math.floor((occupancy.used - guardTokens) / CONTEXT_GUARD_RENUDGE);
-				if (band <= contextDismissedBand(sessionId)) return null;
-
 				var dismiss = function () {
+					if (!above) return;
 					dismissContextBand(sessionId, band);
 					setTick(function (n) { return n + 1; });
 				};
+
+				/**
+				 * Odbacivanje NE sme da bude ćorsokak: kad je opseg odbačen, u
+				 * uglu ostaje mali „pill" sa procentom koji vraća pun panel na
+				 * klik (inače se panel ne može dozvati do +100k tokena — vidi
+				 * 2026-10-07: „ne vidim panel"). Zato se odbacivanje pamti jedan
+				 * opseg NIŽE, pa je isti opseg ponovo „iznad" odbačenog.
+				 */
+				var reopen = function () {
+					if (!above) return;
+					dismissContextBand(sessionId, band - 1);
+					setTick(function (n) { return n + 1; });
+				};
+
+				var open = above && !dismissed;
+
+				// Pill se prikazuje samo kad je opseg odbačen (`!open`), pa se
+				// mesto meri samo tada — ali se hook poziva UVEK (isti broj
+				// hookova u svakom renderu).
+				var pillAnchor = useComposerPillAnchor(!open);
+
+				// Esc zatvara isto kao klik na masku — navika iz core modala
+				// (SettingsPanel). Slušalac postoji samo dok je panel otvoren.
+				useEffect(function () {
+					if (!open) return undefined;
+					var onKey = function (event) {
+						if (event && (event.key === "Escape" || event.keyCode === 27)) dismiss();
+					};
+					if (typeof document !== "undefined" && document !== null) {
+						document.addEventListener("keydown", onKey);
+						return function () { document.removeEventListener("keydown", onKey); };
+					}
+					return undefined;
+				}, [open, sessionId, band]);
+
+				if (sessionId === undefined || occupancy === null) return null;
+				if (!above) return null;
+
+				if (!open) {
+					// Dok kompakcija radi, pill je jedina vidljiva stvar — javlja
+					// da se nešto dešava i ne prima klikove.
+					var compacting = busy === "compact";
+					// Mesto se meri (vidi `useComposerPillAnchor`): tačno ispod
+					// „+" dugmeta u praznom drugom redu composera, a ako tog
+					// prostora nema — levo u dock traci na dnu. `left`/`bottom`
+					// fallback važi samo prvi render pre merenja; DESNA ivica se
+					// više ne koristi, jer je upravo ona krila dugmad.
+					var pillPlacement = pillAnchor === null
+						? { left: 16, bottom: 52 }
+						: { left: pillAnchor.left, top: pillAnchor.top };
+					return modalPortal(createElement("button", {
+						type: "button",
+						"data-composer-extras-context-guard": "pill",
+						disabled: busy !== "",
+						title: compacting
+							? "Kompaktujem…"
+							: "Kontekst " + occupancy.percent + "% — otvori predlog za kompakciju",
+						"aria-label": compacting
+							? "Kompaktujem kontekst"
+							: "Kontekst " + occupancy.percent + "%, otvori predlog za kompakciju",
+						onClick: busy === "" ? reopen : undefined,
+						style: Object.assign({
+							position: "fixed",
+							zIndex: 1200,
+							display: "inline-flex",
+							alignItems: "center",
+							gap: 6,
+							padding: "5px 10px",
+							borderRadius: 999,
+							// Isti razlog kao za pun panel: neprovidna podloga, jer je
+							// `--dsw-specific-menu` poluprovidan i bez blura se providi.
+							background: "var(--dsw-alias-bg-base, #ffffff)",
+							backdropFilter: "var(--dsw-menu-backdrop-filter, blur(20px) saturate(150%))",
+							WebkitBackdropFilter: "var(--dsw-menu-backdrop-filter, blur(20px) saturate(150%))",
+							color: "var(--dsw-alias-label-primary, #111)",
+							border: "1px solid rgba(245, 158, 11, 0.65)",
+							boxShadow: "0 6px 18px rgba(0, 0, 0, 0.45)",
+							fontFamily: "inherit",
+							fontSize: 11.5,
+							cursor: busy === "" ? "pointer" : "default",
+						}, pillPlacement),
+					}, compacting ? "📦 Kompaktujem…" : "📦 Kontekst " + occupancy.percent + "%"));
+				}
 
 				var doBranch = function () {
 					if (busy !== "") return;
@@ -2223,35 +2446,45 @@ window.__ModuleLoader__.load({
 				};
 
 				/**
-				 * Kompakcija na klik. Server čeka da tekući turn pređe u `idle`
-				 * (kompakcija u toku turna nije dozvoljena), pa vraća pravi ishod
-				 * — zato se band odbacuje SAMO na uspeh: ranije se popup zatvarao
-				 * i kad je motor rekao „agent nije idle", što je izgledalo kao da
-				 * dugme ne radi.
+				 * Kompakcija na klik. Kartica se sklanja ODMAH (2026-10-08:
+				 * „kada kliknem očekujem da mi se skloni sa ekrana") — ostaje
+				 * samo pill „📦 Kompaktujem…". Ako server odbije (npr. „agent
+				 * nije idle"), panel se SAM vraća sa porukom servera, da se
+				 * neuspeh ne bi završio tišinom.
 				 */
 				var doCompact = function () {
 					if (busy !== "") return;
 					setNote("Kompaktujem… ako turn traje, čekam da se završi.");
 					setBusy("compact");
+					dismissContextBand(sessionId, band);
+					setTick(function (n) { return n + 1; });
 					compactSession(sessionId, 90000)
 						.then(function (value) {
 							setBusy("");
 							var kind = value && value.kind ? value.kind : "success";
 							if (kind === "success") {
-								dismissContextBand(sessionId, band);
+								setTick(function (n) { return n + 1; });
 								return;
 							}
 							setNote((value && value.text) ? value.text : "Kompakcija nije uspela.");
+							// Vrati panel (opseg jedan niže = „iznad" odbačenog).
+							dismissContextBand(sessionId, band - 1);
 							setTick(function (n) { return n + 1; });
 						})
 						.catch(function (error) {
 							setBusy("");
 							setNote("Greška: " + (error && error.message ? error.message : String(error)));
+							dismissContextBand(sessionId, band - 1);
 							setTick(function (n) { return n + 1; });
 						});
 				};
 
-				var modalButton = function (key, label, hint, onClick, danger) {
+				/** `tone`: "primary" (preporučena radnja), "muted" (ostavi me na miru)
+				 * ili "neutral". Boje su namerno konkretne (ne samo tokeni): panel
+				 * mora da se vidi i u svetloj i u tamnoj temi. */
+				var modalButton = function (key, label, hint, onClick, tone) {
+					var primary = tone === "primary";
+					var muted = tone === "muted";
 					return createElement("button", {
 						key: key,
 						type: "button",
@@ -2263,10 +2496,14 @@ window.__ModuleLoader__.load({
 							padding: "8px 10px",
 							margin: "0 0 6px 0",
 							borderRadius: 8,
-							border: "0.5px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.35))",
-							background: danger
-								? "var(--dsw-alias-bg-layer-2, rgba(127,127,127,0.12))"
-								: "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,0.18))",
+							border: primary
+								? "1px solid #f59e0b"
+								: "0.5px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.35))",
+							background: primary
+								? "rgba(245, 158, 11, 0.16)"
+								: (muted
+									? "transparent"
+									: "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,0.18))"),
 							color: "var(--dsw-alias-label-primary, inherit)",
 							fontFamily: "inherit",
 							fontSize: 12,
@@ -2286,24 +2523,70 @@ window.__ModuleLoader__.load({
 						}, hint));
 				};
 
-				return createElement("div", {
-					"data-composer-extras-context-guard": true,
+				return modalPortal(createElement("div", {
+					// Overlay preko celog ekrana (u portalu, u `document.body`) —
+					// jedini način da kartica bude TAČNO na sredini ekrana, a ne uz
+					// ivicu composera (2026-10-08: „izašao je sa strane").
+					"data-composer-extras-context-guard-overlay": true,
 					style: {
 						position: "fixed",
-						right: 12,
-						bottom: 96,
-						zIndex: 1200,
-						width: "min(320px, calc(100vw - 24px))",
+						top: 0,
+						right: 0,
+						bottom: 0,
+						left: 0,
+						zIndex: 1300,
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "center",
+						padding: 16,
 						boxSizing: "border-box",
-						padding: 12,
-						borderRadius: 12,
-						background: "var(--dsw-specific-menu, #1e1e2f)",
-						color: "var(--dsw-alias-label-primary, #fff)",
-						boxShadow: "var(--dsw-elevation-prominent, 0 10px 25px rgba(0,0,0,0.5))",
-						border: "0.5px solid var(--dsw-alias-border-l1, rgba(127,127,127,0.4))",
-						fontFamily: "inherit",
 					},
 				},
+					createElement("div", {
+						// Maska je ZASEBAN element (kao u core SettingsPanel-u), pa
+						// klik na karticu ne može da je pogodi — nema stopPropagation.
+						// Klik na masku = „Nastavi dalje": panel se sklanja.
+						"data-composer-extras-context-guard": "mask",
+						"aria-hidden": "true",
+						onClick: dismiss,
+						style: {
+							position: "absolute",
+							top: 0,
+							right: 0,
+							bottom: 0,
+							left: 0,
+							background: "rgba(0, 0, 0, 0.45)",
+						},
+					}),
+					createElement("div", {
+						"data-composer-extras-context-guard": true,
+						role: "dialog",
+						"aria-modal": "true",
+						"aria-label": "Kontekst " + occupancy.percent + "% — predlog za kompakciju",
+						style: {
+							position: "relative",
+							zIndex: 1,
+							boxSizing: "border-box",
+							width: "min(340px, 100%)",
+							maxHeight: "calc(100vh - 32px)",
+							overflowY: "auto",
+							padding: 14,
+							borderRadius: 14,
+							// NEPROVIDNA podloga. `--dsw-specific-menu` je u svetloj temi
+							// `#f8f9fa94` (58% alfa) i u core-u se koristi uz
+							// `backdrop-filter`; bez blura se tekst iza panela providi i
+							// panel je nečitljiv (vidi 2026-10-07 screenshot). Zato
+							// `bg-base` (#fff / #151517) + blur kao pojas i šraf.
+							background: "var(--dsw-alias-bg-base, #ffffff)",
+							WebkitBackdropFilter: "var(--dsw-menu-backdrop-filter, blur(20px) saturate(150%))",
+							backdropFilter: "var(--dsw-menu-backdrop-filter, blur(20px) saturate(150%))",
+							color: "var(--dsw-alias-label-primary, #111)",
+							boxShadow: "0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(245, 158, 11, 0.45)",
+							border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.45))",
+							borderLeft: "3px solid #f59e0b",
+							fontFamily: "inherit",
+						},
+					},
 					createElement("div", {
 						style: {
 							display: "flex",
@@ -2336,24 +2619,25 @@ window.__ModuleLoader__.load({
 						"⇄  Branch into new session",
 						"Prazna sesija u istom workspace-u dobija trenutni prompt; istorija se ne prenosi.",
 						doBranch,
-						false),
+						"neutral"),
 					modalButton(
 						"compact",
 						"📦  Compact session",
 						"Sažima istoriju u OVOJ sesiji i ostaje u njoj. Ako turn traje, sačekaće da se završi.",
 						doCompact,
-						false),
+						"primary"),
 					modalButton(
 						"later",
 						"Nastavi dalje",
 						"Ne diraj ništa; podsetnik se vraća tek posle još "
 							+ formatTokenCount(CONTEXT_GUARD_RENUDGE) + " tokena.",
 						dismiss,
-						true),
+						"muted"),
 					note === "" ? null : createElement("div", {
 						style: { marginTop: 4, fontSize: 10.5, color: "var(--dsw-alias-label-secondary, #999)" },
 					}, note)
-				);
+					)
+				));
 			}
 
 			/** 500000 → „500k", 1000000 → „1M" (kao ContextMeter). */

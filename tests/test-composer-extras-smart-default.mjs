@@ -66,6 +66,13 @@ const React = {
 	useSyncExternalStore(_sub, get) { return get(); },
 };
 
+// ContextGuard renderuje modal kroz `createPortal` (u `document.body`); ovaj
+// harness ne testira modal, pa je dovoljan identitet — bitno je da `require`
+// ne baca, da se ne bi testirao fail-open fallback umesto pravog puta.
+const ReactDOM = {
+	createPortal(node) { return node; },
+};
+
 // ────────────────────────────────────────────────── lažni window/localStorage
 
 function makeLocalStorage() {
@@ -240,6 +247,7 @@ new Function("window", "require", "fetch", "document", "setTimeout", "setInterva
 	window,
 	(id) => {
 		if (id === "react") return React;
+		if (id === "react-dom") return ReactDOM;
 		throw new Error("unknown require: " + id);
 	},
 	globalThis.fetch,
@@ -252,6 +260,7 @@ new Function("window", "require", "fetch", "document", "setTimeout", "setInterva
 if (capturedFactory === null) throw new Error("plugin se nije registrovao preko __ModuleLoader__");
 const mod = capturedFactory((id) => {
 	if (id === "react") return React;
+	if (id === "react-dom") return ReactDOM;
 	throw new Error("unknown require: " + id);
 });
 mod.apply(ctx);

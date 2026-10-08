@@ -519,8 +519,8 @@ pkill -f 'dsh/lib/bin[.]js' && dsh
 > ⛔ **Od 0.2.0-rc.2 taj ručni put uopšte ne prolazi.** `dsh-fs-local` pinuje
 > `koffi@3.1.1`, koji nema `@koromix/koffi-android-arm64` prebuild, pa `npm
 > install -g` padne na CMake/`statx` grešci **pre ijednog instaliranog paketa**.
-> Jedini put je `~/dsh/dsh-update.sh` (faze 4b/4c to rešavaju) — vidi
-> **AŽURIRANJA — 2026-10-06** i `~/dsh/SANDBOX-DOKAZ-0.2.0-rc.2.md`.
+> Jedini put je `~/dsh/dsh-update.sh` (faze 4b/4c to rešavaju) — vidi odeljak
+> **AŽURIRANJA — 2026-10-06** niže u ovom uputstvu.
 
 U praksi ni to ne treba raditi ručno — `~/.local/bin/dsh-termux` pokreće
 `patch-android-dsh.py` sam, pri svakom startu.
@@ -544,8 +544,12 @@ proširiti. Instalirano i provereno na ovom uređaju:
   workspace-om (browse, upload sa telefona, mkdir, rename, delete, image
   preview) plus `/clear-context` i `/restart-dsh` slash komande. Vidi dole
   "9b. `dsh-composer-extras`" za punu dokumentaciju.
+- **`dsh-chat-jump-arrows`** (lokalni, `~/dsh/dsh-chat-jump-arrows`, od
+  2026-10-07) — dve lebdeće strelice ▲▼ uz desnu ivicu razgovora koje šetaju
+  **tvoje** poruke (dsh-ov ugrađeni rail šeta turn-ove i sakriven je na uskom
+  ekranu). Vidi dole „9c. `dsh-chat-jump-arrows`".
 
-Sva tri su potvrđena na ekranu, ne samo u konfiguraciji.
+Sva četiri su potvrđena na ekranu, ne samo u konfiguraciji.
 
 ### Gde se `dsh-context` vidi
 
@@ -942,6 +946,53 @@ Skript sam ubije stari proces, podigne wrapper i verifikuje HTTP
 koristi** — to je stara, duplirana logika (vidi 9b). Hard-refresh browser-a
 posle (da dohvati novi `client.js` — dsh ne hot-reload-uje plugin bundlove).
 
+## 9c. `dsh-chat-jump-arrows` — ▲▼ kroz moje poruke
+
+**Problem:** na telefonu jedan odgovor agenta ume da bude hiljade piksela
+„procesa", a tvoje pitanje ostane visoko iznad ekrana. dsh-ov ugrađeni
+`TurnNavigator` šeta **turn-ove** (ne pitanja) i njegov CSS ga sakriva na uskim
+ekranima (`@container (width<=900px){display:none}`), a ugrađeno „to bottom"
+dugme je samo jednosmerno.
+
+**Rešenje:** lokalni plugin sa dva lebdeća chevrona uz **desnu ivicu razgovora**
+(ne ekrana), po sredini visine:
+
+| Element | Šta radi |
+|---|---|
+| **▲** | prethodna **moja** poruka (`user`, i `steering` = poslato dok agent radi). Sleće 12px pod vrh. |
+| **▼** | sledeća moja poruka; sa poslednje pada na **dno** razgovora (time se i dsh-ov follow-tail sam ponovo uključi). |
+| **`n/m`** | badge između strelica — koja sam od koliko svojih poruka. `0/3` = iznad svih. |
+
+Detalji koji se ne smeju pogaziti:
+
+- **Seat je `shell.overlay`** — zvanični „frame-wide floating" sloj iz
+  `dsh-client-ui-layout` (`kind: list`, `scope: root`, `pointer-events: none`
+  uz `> * { pointer-events: auto }`). **Ništa u chatu se ne patchuje**, pa
+  `npm install -g @deepseek-ai/dsh@latest` ne može da ga obriše.
+- Čita **samo DOM atribute koje je dsh proglasio stabilnim**:
+  `[data-conversation-scroll]` (pravi `overflow-y: auto` scrollport) i
+  `[data-chat-flow-kind="user"|"steering"]` na najspoljašnjem `.flowItem`.
+- **Dok je otvoren picker / dijalog / meni, strelica nema.** Sloj strelica je
+  iznad composera, pa `z-index: 10000` pickera ne pomaže — strelice bi lebdele
+  preko njega i kradle dodire (🗑️ se teško klikne, a prevlačenje preko kartice
+  skroluje transkript iza nje). Zato se plugin sklanja kad u dokumentu postoji
+  `[role="dialog"][aria-modal="true"]`, `[role="menu"]` ili
+  **`[data-dsh-overlay-surface]`** — oznaka koju picker iz 9b nosi. **Nova
+  overlay površina mora da nosi tu oznaku** (ili `role="dialog"` +
+  `aria-modal="true"`).
+
+Primena / provera posle izmene:
+
+```bash
+node -c ~/dsh/dsh-chat-jump-arrows/client.js
+node ~/dsh/tests/test-chat-jump-arrows.mjs      # 53 provere, offline
+# klijentski bundle (samo client.js) → dovoljan je HARD REFRESH taba;
+# restart treba samo ako se menja package.json/index.js/cordis.patch.yml
+bash ~/.dsh/skills/restart-dsh/restart-dsh.sh
+```
+
+Puna dokumentacija: `UPUTSTVO-strelice.md`; pravila: `PRAVILA-DSH.md` §5.
+
 ## 10. Brza tabela problema
 
 | Simptom | Uzrok | Rešenje |
@@ -968,6 +1019,8 @@ posle (da dohvati novi `client.js` — dsh ne hot-reload-uje plugin bundlove).
 | `ERR_PNPM_IGNORED_BUILDS` | pnpm blokira build skripte | `allowBuilds: {node-pty: true}` |
 | plugin instaliran ali se ne vidi | nije u `dsh.profile.bundles` | dopiši ga u `package.json` profila |
 | `dsh` javlja `--profile is required` | pozvan `/usr/bin/dsh`, ne bash funkcija | koristi `~/.local/bin/dsh-termux` |
+| strelice ▲▼ se ne vide posle izmene | klijentski bundle se ne čita ponovo | **hard refresh** taba (restart treba samo za `package.json`/`index.js`) |
+| strelice ▲▼ nema dok je picker otvoren | namerno — sloj strelica je iznad composera | ništa; sklone se da picker prima dodire (9c) |
 
 ---
 ---
@@ -1457,7 +1510,9 @@ restart, vidi 9b); klijent (dugmad) se učitava na refresh stranice.
 
 Prva **major** promena verzije od kad je auto-update ukinut. Ceo put je prvo
 prošao u sandboxu (`--no-swap`), pa je tek onda zamenjena živa instalacija.
-Puni dokazi: `~/dsh/SANDBOX-DOKAZ-0.2.0-rc.2.md`.
+Ovaj odeljak je sažetak tog prolaza; transkript dokaza
+(`SANDBOX-DOKAZ-0.2.0-rc.2.md`) je uklonjen iz arhive 2026-10-08 kao istorijski
+materijal koji nije uputstvo.
 
 ## A. Blokada: `koffi@3.1.1` nema android prebuild
 

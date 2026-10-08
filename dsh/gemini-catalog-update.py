@@ -82,6 +82,12 @@ def _unknown_tag(loader, tag_suffix, node):
 
 
 _Loader.add_multi_constructor("!", _unknown_tag)
+# `!!js` se NE resava u lokalni tag nego u `tag:yaml.org,2002:js`, a PyYAML
+# poredi prefiks multi-konstruktora sa VEC RESENIM tagom — pa ga `"!"` gore
+# nikad ne vidi. Bez ovoga je svaki start prijavljivao "se ne parsira" i
+# osvezavanje Gemini kataloga je tiho preskakano (2026-10-08).
+JS_TAG = "tag:yaml.org,2002:js"
+_Loader.add_multi_constructor(JS_TAG, _unknown_tag)
 
 
 def _construct_mapping(loader, node, deep=False):

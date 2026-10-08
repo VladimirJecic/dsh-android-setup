@@ -54,6 +54,17 @@ const React = {
 
 // ──────────────────────────────────────────────────────────────── DOM/node
 
+/**
+ * `react-dom` u testu: `createPortal` ne dira pravi DOM, samo umota čvor u
+ * prozirni `$$node` sa `portalTarget` — pa `walk`/`textOf` rade isto kao da je
+ * portal običan element, a test može da proveri GDE je portal otišao.
+ */
+const ReactDOM = {
+	createPortal(node, container) {
+		return { $$node: true, type: "portal", props: {}, children: [node], portalTarget: container };
+	},
+};
+
 function textOf(node) {
 	if (node === null || node === undefined) return "";
 	if (typeof node === "string") return node;
@@ -188,6 +199,7 @@ new Function("window", "require", "fetch", "document", "setTimeout", "setInterva
 	window,
 	(id) => {
 		if (id === "react") return React;
+		if (id === "react-dom") return ReactDOM;
 		throw new Error("unknown require: " + id);
 	},
 	globalThis.fetch,
@@ -244,6 +256,29 @@ function renderGuard(pressure, sessionId = "session-test-1") {
 	return { tree, calls };
 }
 
+/** Sve što nosi `data-composer-extras-context-guard` sa datom vrednošću. */
+function guardTag(tree, value) {
+	return walk(tree).find((n) => n.props && n.props["data-composer-extras-context-guard"] === value);
+}
+
+/** Pun panel (kartica) nosi `data-composer-extras-context-guard: true`, pill "pill", maska "mask". */
+function isFullPanel(tree) {
+	return guardTag(tree, true) !== undefined;
+}
+
+function isPill(tree) {
+	return guardTag(tree, "pill") !== undefined;
+}
+
+function overlayOf(tree) {
+	return walk(tree).find((n) => n.props && n.props["data-composer-extras-context-guard-overlay"] === true);
+}
+
+/** Čvor koji je `createPortal` vratio (nosi `portalTarget`). */
+function portalOf(tree) {
+	return walk(tree).find((n) => n.portalTarget !== undefined);
+}
+
 // ── 1. registracija ────────────────────────────────────────────────────────
 
 section("1. Registracija modula i slotova");
@@ -251,6 +286,7 @@ check("modul se registrovao pod id 'dsh-composer-extras'", moduleRegistration &&
 
 const exportsObj = moduleRegistration.factory((id) => {
 	if (id === "react") return React;
+	if (id === "react-dom") return ReactDOM;
 	throw new Error("unknown require: " + id);
 });
 
@@ -270,19 +306,42 @@ check("stari slotovi netaknuti (paperclip/try-again/proceed)",
 
 // ── 2. ContextGuard: prag i izvor broja ────────────────────────────────────
 
-section("2. ContextGuard — prag od 500.000 (50% od 1M)");
+/**
+ * Prag guard-a se ČITA iz samog koda (a ne hardkoduje u testu): prag je
+ * `min(CONTEXT_GUARD_TOKENS, prozor × CONTEXT_GUARD_WINDOW_FRACTION)`, pa test
+ * ostaje validan i kad se fraction privremeno spusti (npr. 0.25 za testiranje)
+ * i kad se vrati na 0.5.
+ */
+const WINDOW = 1000000;
+const guardTokensConst = Number(/CONTEXT_GUARD_TOKENS = (\d+)/.exec(source)[1]);
+const guardFraction = Number(/CONTEXT_GUARD_WINDOW_FRACTION = ([\d.]+)/.exec(source)[1]);
+const guardRenudge = Number(/CONTEXT_GUARD_RENUDGE = (\d+)/.exec(source)[1]);
+const GUARD_AT = Math.min(guardTokensConst, Math.round(WINDOW * guardFraction));
+const GUARD_BELOW = GUARD_AT - 1;
+const GUARD_PERCENT = Math.round((GUARD_AT / WINDOW) * 100);
+const GUARD_NEXT_BAND = GUARD_AT + guardRenudge;
+
+section(`2. ContextGuard — prag od ${GUARD_AT.toLocaleString("sr-RS")} (${GUARD_PERCENT}% od 1M)`);
 
 {
-	const { tree, calls } = renderGuard({ pressureTokens: 499999, contextWindow: 1000000 });
-	check("ispod praga (499.999) → nema popup-a", tree === null);
+	// 2026-10-08: korisnik traži „da ga ne vidim ispod 50%" — frakcija je
+	// vraćena sa privremenih 0.05/0.25 na 0.5 i tu ostaje.
+	check("prag je TAČNO 50% prozora (0.5, ne privremenih 0.05/0.25)",
+		guardFraction === 0.5 && GUARD_AT === 500000,
+		`frakcija=${guardFraction} prag=${GUARD_AT}`);
+}
+
+{
+	const { tree, calls } = renderGuard({ pressureTokens: GUARD_BELOW, contextWindow: WINDOW });
+	check(`ispod praga (${GUARD_BELOW.toLocaleString("sr-RS")}) → nema popup-a`, tree === null);
 	check("čita TAČNO 'contextPressure' (ne 'tokenUsage')",
 		calls.length === 1 && calls[0] === "contextPressure", JSON.stringify(calls));
 }
 
 {
-	const { tree } = renderGuard({ pressureTokens: 500000, contextWindow: 1000000 });
-	check("tačno na pragu (500.000 = 50%) → popup se pojavljuje", tree !== null);
-	check("popup prikazuje 50%", textOf(tree).includes("50%"), textOf(tree).slice(0, 120));
+	const { tree } = renderGuard({ pressureTokens: GUARD_AT, contextWindow: WINDOW });
+	check(`tačno na pragu (${GUARD_AT.toLocaleString("sr-RS")} = ${GUARD_PERCENT}%) → popup se pojavljuje`, tree !== null);
+	check(`popup prikazuje ${GUARD_PERCENT}%`, textOf(tree).includes(`${GUARD_PERCENT}%`), textOf(tree).slice(0, 120));
 	const btns = buttons(tree);
 	check("popup ima tri dugmeta (branch / compact / nastavi)", btns.length === 3, `nađeno ${btns.length}`);
 	const labels = textOf(tree);
@@ -293,17 +352,17 @@ section("2. ContextGuard — prag od 500.000 (50% od 1M)");
 
 {
 	// projectedTokens ima prednost (isto kao ContextMeter u core-u)
-	const { tree } = renderGuard({ projectedTokens: 260000, pressureTokens: 900000, contextWindow: 1000000 });
-	check("koristi projectedTokens pre pressureTokens (260k < prag) → nema popup-a", tree === null);
+	const { tree } = renderGuard({ projectedTokens: GUARD_BELOW, pressureTokens: 900000, contextWindow: WINDOW });
+	check("koristi projectedTokens pre pressureTokens (ispod praga) → nema popup-a", tree === null);
 }
 
 {
-	const { tree } = renderGuard({ pressureTokens: 750000, contextWindow: 1000000 });
+	const { tree } = renderGuard({ pressureTokens: 750000, contextWindow: WINDOW });
 	check("750.000 (75%) → popup", tree !== null);
 }
 
 {
-	const { tree } = renderGuard({ pressureTokens: 1000000, contextWindow: 1000000 });
+	const { tree } = renderGuard({ pressureTokens: WINDOW, contextWindow: WINDOW });
 	check("1.000.000 (100%) → popup", tree !== null);
 	check("procenat ograničen na 100%", textOf(tree).includes("100%"));
 }
@@ -312,30 +371,117 @@ section("2. ContextGuard — prag od 500.000 (50% od 1M)");
 
 section("3. Regresija — Token usage (kumulativno) NE pokreće popup");
 {
-	// Ovo je scenario sa screenshota: 25,5M ukupno, 925k uncached, a kontekst
-	// (pressure) je zapravo bio ~250k = 25%.
-	const { tree } = renderGuard({ projectedTokens: 250000, pressureTokens: 240000, contextWindow: 1000000 });
-	check("25,5M kumulativno + 25% zauzetosti → NEMA popup-a (isključivo pressure se meri)", tree === null);
+	// Scenario sa screenshota: 25,5M ukupno u metru, a kontekst (pressure) je
+	// zapravo bio ispod praga. Guard sme da gleda ISKLJUČIVO pressure.
+	const { tree } = renderGuard({ projectedTokens: GUARD_BELOW, pressureTokens: GUARD_BELOW - 10000, contextWindow: WINDOW });
+	check("kumulativni metar ne pokreće popup (isključivo pressure se meri)", tree === null);
 }
 
 // ── 4. odbacivanje opsega ─────────────────────────────────────────────────
 
-section("4. ContextGuard — odbacivanje (Nastavi dalje)");
+section("4. ContextGuard — odbacivanje (Nastavi dalje) + pill za ponovno otvaranje");
 {
 	const sessionId = "session-dismiss-test";
 	storage.clear();
-	const first = renderGuard({ pressureTokens: 520000, contextWindow: 1000000 }, sessionId);
-	check("prvi render iznad praga → popup", first.tree !== null);
+	const first = renderGuard({ pressureTokens: GUARD_AT + 1000, contextWindow: WINDOW }, sessionId);
+	check("prvi render iznad praga → popup", isFullPanel(first.tree));
 
 	// klik na „Nastavi dalje" (treće dugme)
 	const later = buttons(first.tree)[2];
 	later.props.onClick();
 
-	const second = renderGuard({ pressureTokens: 520000, contextWindow: 1000000 }, sessionId);
-	check("posle odbacivanja, isti opseg se ne prikazuje", second.tree === null);
+	const second = renderGuard({ pressureTokens: GUARD_AT + 1000, contextWindow: WINDOW }, sessionId);
+	check("posle odbacivanja nema punog panela", !isFullPanel(second.tree));
+	check("posle odbacivanja ostaje mali pill (da panel nije ćorsokak)",
+		isPill(second.tree) && textOf(second.tree).includes("Kontekst"), textOf(second.tree));
 
-	const third = renderGuard({ pressureTokens: 800000, contextWindow: 1000000 }, sessionId);
-	check("posle rasta u sledeći opseg (800k) → popup se vraća", third.tree !== null);
+	// klik na pill → pun panel se vraća (odbacivanje se pamti jedan opseg niže)
+	guardTag(second.tree, "pill").props.onClick();
+	const reopened = renderGuard({ pressureTokens: GUARD_AT + 1000, contextWindow: WINDOW }, sessionId);
+	check("klik na pill ponovo otvara pun panel", isFullPanel(reopened.tree));
+
+	const third = renderGuard({ pressureTokens: GUARD_NEXT_BAND + 1000, contextWindow: WINDOW }, sessionId);
+	check(`posle rasta u sledeći opseg (${GUARD_NEXT_BAND.toLocaleString("sr-RS")}) → popup se vraća`, isFullPanel(third.tree));
+}
+
+// ── 4b. modal: centriran, portalan, sklanja se klikom ─────────────────────
+//
+// 2026-10-08: panel je bio `position: fixed` UNUTAR slota u composeru, pa je
+// ispadao uz desnu ivicu („izašao je sa strane") i nije se sklanjao na klik.
+// Sada je kartica u portalu (document.body), centrirana preko overlaya, a
+// klik na masku je isto što i „Nastavi dalje".
+
+section("4b. ContextGuard — centriran modal u portalu, klik na masku zatvara");
+{
+	const sessionId = "session-modal-test";
+	storage.clear();
+	const props = (pressure) => ({
+		sessionId,
+		useProjection: () => pressure,
+	});
+	const { tree } = renderGuard({ pressureTokens: GUARD_AT + 1000, contextWindow: WINDOW }, sessionId);
+
+	const portal = portalOf(tree);
+	check("kartica je u portalu (createPortal), ne inline u composeru", portal !== undefined);
+	check("portal cilja `document.body`", portal !== undefined && portal.portalTarget === globalThis.document.body,
+		String(portal && portal.portalTarget));
+
+	const overlay = overlayOf(tree);
+	const overlayStyle = overlay ? overlay.props.style : {};
+	check("overlay je fiksiran preko celog ekrana",
+		overlayStyle.position === "fixed" &&
+		overlayStyle.top === 0 && overlayStyle.right === 0 && overlayStyle.bottom === 0 && overlayStyle.left === 0,
+		JSON.stringify(overlayStyle));
+	check("overlay CENTRIRA karticu (flex + center/center)",
+		overlayStyle.display === "flex" &&
+		overlayStyle.alignItems === "center" && overlayStyle.justifyContent === "center",
+		`${overlayStyle.display}/${overlayStyle.alignItems}/${overlayStyle.justifyContent}`);
+
+	const mask = guardTag(tree, "mask");
+	check("postoji maska preko celog ekrana", mask !== undefined);
+	const card = guardTag(tree, true);
+	check("kartica je IZNAD maske (inače maska pojede klikove)",
+		(card.props.style || {}).position === "relative" && (card.props.style || {}).zIndex === 1,
+		JSON.stringify(card.props.style));
+	check("maska ima svoj onClick (klik bilo gde van kartice zatvara)", typeof mask.props.onClick === "function");
+
+	// Klik na masku = odbaci opseg.
+	mask.props.onClick();
+	const afterMask = renderGuard({ pressureTokens: GUARD_AT + 1000, contextWindow: WINDOW }, sessionId);
+	check("klik na masku sklanja panel sa ekrana", !isFullPanel(afterMask.tree));
+	check("posle klika na masku ostaje pill (nije ćorsokak)", isPill(afterMask.tree));
+	void props;
+
+	// Esc (kô u core SettingsPanel-u) — `useEffect` se u ovom harness-u ne
+	// izvršava, pa se veza proverava na izvoru.
+	check("Esc je vezan na document (keydown → dismiss)",
+		/document\.addEventListener\("keydown", onKey\)/.test(source) && /event\.key === "Escape"/.test(source));
+
+	// ── mesto pill-a: dole levo ispod „+", NIKAD desna ivica ────────────────
+	//
+	// 2026-10-08 (drugi krug): pill je bio `right: 12; bottom: 96` i na telefonu
+	// je prekrio red sa dugmadima. Sada se mesto MERI iz DOM-a (kartica
+	// `[data-composer-card]` + „+" dugme sa `aria-haspopup="listbox"`), a ovaj
+	// harness nema DOM/effect, pa vidi statični fallback.
+	const pillStyle = (guardTag(afterMask.tree, "pill").props.style) || {};
+	check("pill se NE lepi za desnu ivicu (ne može da prekrije dugmad desno)",
+		pillStyle.right === undefined && pillStyle.left !== undefined,
+		JSON.stringify(pillStyle));
+	check("pill je fiksiran i stoji levo/dole (fallback bez DOM-a)",
+		pillStyle.position === "fixed" && typeof pillStyle.left === "number" &&
+		typeof (pillStyle.bottom !== undefined ? pillStyle.bottom : pillStyle.top) === "number",
+		`${pillStyle.position} left=${pillStyle.left} top=${pillStyle.top} bottom=${pillStyle.bottom}`);
+	check("pill u odbačenom stanju ne koristi `right` ni `top` (fallback levo/dole)",
+		pillStyle.right === undefined && pillStyle.top === undefined && pillStyle.left === 16,
+		String(pillStyle.left));
+	check("mesto pill-a se MERI iz composera (kartica + „+\" sa aria-haspopup)",
+		/document\.querySelector\("\[data-composer-card\]"\)/.test(source) &&
+		/'button\[aria-haspopup="listbox"\]'/.test(source) &&
+		/window\.addEventListener\("resize", measure\)/.test(source),
+		"nema merenja u izvoru");
+	check("postoji i rezervno mesto u dock traci kad ispod „+\" nema prostora",
+		/viewport - CONTEXT_GUARD_PILL_HEIGHT/.test(source) &&
+		/cardBox\.bottom - CONTEXT_GUARD_PILL_HEIGHT/.test(source));
 }
 
 // ── 5. Branch dugme ───────────────────────────────────────────────────────
@@ -401,44 +547,163 @@ section("6. NewlineButton (višeredni prompt)");
 
 // ── 7. Compact iz popup-a ─────────────────────────────────────────────────
 
-section("7. Compact iz popup-a — /compact bez brisanja drafta");
+section("7. Compact iz popup-a — /composer-extras/api/compact, draft se NE dira");
 {
 	storage.clear();
 	activeInput = makeInput("moj nedovršen tekst");
+	fetchCalls.length = 0;
+	let payload = null;
+	fetchImpl = async (url, opts) => {
+		if (String(url).includes("/api/compact")) {
+			payload = JSON.parse(opts.body);
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({
+					ok: true,
+					value: { kind: "success", text: "Compacted 339 history items (~160236 tokens)." },
+				}),
+			};
+		}
+		return { ok: true, status: 200, json: async () => ({ ok: true, value: {} }) };
+	};
 	resetHooks();
-	const tree = render("conversation.input.left", "composer-extras-context-guard", {
+	const props = {
 		sessionId: "session-compact",
 		useProjection: () => ({ pressureTokens: 600000, contextWindow: 1000000 }),
-	});
+	};
+	const tree = render("conversation.input.left", "composer-extras-context-guard", props);
 	const compactBtn = buttons(tree)[1];
 	check("drugo dugme je Compact", textOf(compactBtn).includes("Compact"), textOf(compactBtn));
 	compactBtn.props.onClick();
 
-	check("poslat je /compact (submit pozvan, draft konzumiran)", (activeInput.api.__submits || 0) === 1);
+	// Kompakciju izvršava NAŠ server (čeka da agent pređe u idle i vraća pravi
+	// ishod) — dugme NE piše u draft i NE submit-uje ništa iz composera.
+	check("poslat je POST na /composer-extras/api/compact",
+		fetchCalls.some((c) => String(c.url).includes("/api/compact")),
+		JSON.stringify(fetchCalls.map((c) => String(c.url))));
+	check("payload nosi sessionId i waitMs: 90000",
+		payload !== null && payload.sessionId === "session-compact" && payload.waitMs === 90000,
+		JSON.stringify(payload));
+	check("draft korisnika NIJE diran (nema composer submit-a)", (activeInput.api.__submits || 0) === 0,
+		String(activeInput.api.__submits));
+	check("draft je i dalje tu", activeInput.draft === "moj nedovršen tekst", JSON.stringify(activeInput.draft));
 
-	// Prvi interval (50ms) vidi prazan draft i vraća korisnikov tekst.
-	await new Promise((r) => setTimeout(r, 200));
-	check("korisnikov draft vraćen posle komande", activeInput.draft === "moj nedovršen tekst",
-		JSON.stringify(activeInput.draft));
+	await new Promise((r) => setTimeout(r, 60));
+	check("posle uspeha opseg je odbačen (nema više punog panela)",
+		!isFullPanel(rerender("conversation.input.left", "composer-extras-context-guard", props)));
 }
 
 {
-	// Komanda NIJE konzumirana (npr. /compact odbijen jer agent nije idle):
-	// draft ostaje „/compact", pa ga fallback na roku MORА vratiti korisniku.
+	// 2026-10-08: „kada kliknem očekujem da mi se skloni sa ekrana" — kartica se
+	// sklanja ODMAH na klik (dok traje), a ostaje samo pill „📦 Kompaktujem…".
+	storage.clear();
+	activeInput = makeInput("drugi nedovršen tekst");
+	fetchCalls.length = 0;
+	let release = null;
+	fetchImpl = async () => new Promise((resolve) => {
+		release = () => resolve({
+			ok: true,
+			status: 200,
+			json: async () => ({ ok: true, value: { kind: "success", text: "ok" } }),
+		});
+	});
+	resetHooks();
+	const props = {
+		sessionId: "session-compact-instant",
+		useProjection: () => ({ pressureTokens: 620000, contextWindow: 1000000 }),
+	};
+	const tree = render("conversation.input.left", "composer-extras-context-guard", props);
+	check("pre klika: pun panel", isFullPanel(tree));
+	buttons(tree)[1].props.onClick();
+
+	const rightAfter = rerender("conversation.input.left", "composer-extras-context-guard", props);
+	check("ODMAH posle klika nema kartice (sklonila se sa ekrana)", !isFullPanel(rightAfter));
+	check("ODMAH posle klika vidi se pill „Kompaktujem…\"",
+		isPill(rightAfter) && textOf(rightAfter).includes("Kompaktujem"), textOf(rightAfter));
+	check("pill u toku kompakcije ne prima klik (disabled)",
+		guardTag(rightAfter, "pill").props.disabled === true);
+	check("pill u toku kompakcije nema onClick",
+		guardTag(rightAfter, "pill").props.onClick === undefined);
+	check("pill u toku kompakcije stoji levo/dole (ne skače na desnu ivicu)",
+		(guardTag(rightAfter, "pill").props.style || {}).right === undefined &&
+		typeof (guardTag(rightAfter, "pill").props.style || {}).left === "number",
+		JSON.stringify(guardTag(rightAfter, "pill").props.style));
+
+	if (release) release();
+	await new Promise((r) => setTimeout(r, 60));
+	const settled = rerender("conversation.input.left", "composer-extras-context-guard", props);
+	check("posle uspeha ostaje samo pill (nema kartice)", !isFullPanel(settled) && isPill(settled));
+}
+
+{
+	// Neuspeh (npr. „agent nije idle"): poruka servera se vidi, a opseg NIJE
+	// odbačen — inače popup nestane i izgleda kao da je kompakcija uspela.
 	storage.clear();
 	activeInput = makeInput("tekst koji ne sme da se izgubi");
-	activeInput.api.submit = function () { this.__submits = (this.__submits || 0) + 1; };
+	fetchCalls.length = 0;
+	fetchImpl = async () => ({
+		ok: true,
+		status: 200,
+		json: async () => ({
+			ok: true,
+			value: {
+				kind: "error",
+				text: "Compaction is unavailable because this process has an active compaction, or the agent is not idle.",
+			},
+		}),
+	});
 	resetHooks();
-	const tree = render("conversation.input.left", "composer-extras-context-guard", {
+	const props = {
 		sessionId: "session-compact-reject",
 		useProjection: () => ({ pressureTokens: 610000, contextWindow: 1000000 }),
-	});
+	};
+	const tree = render("conversation.input.left", "composer-extras-context-guard", props);
 	buttons(tree)[1].props.onClick();
-	check("nekonzumirana komanda ostaje u draftu odmah posle klika", activeInput.draft === "/compact");
+	await new Promise((r) => setTimeout(r, 60));
+	const after = rerender("conversation.input.left", "composer-extras-context-guard", props);
+	check("neuspeh: popup OSTAJE (opseg nije odbačen)", after !== null);
+	check("neuspeh: prikazana je poruka servera",
+		after !== null && textOf(after).includes("not idle"),
+		textOf(after).slice(0, 160));
+	check("neuspeh: draft je netaknut", activeInput.draft === "tekst koji ne sme da se izgubi",
+		JSON.stringify(activeInput.draft));
+}
 
-	await new Promise((r) => setTimeout(r, 1900));
-	check("posle roka, korisnikov tekst je vraćen (nije izgubljen)",
-		activeInput.draft === "tekst koji ne sme da se izgubi", JSON.stringify(activeInput.draft));
+// ── 8. Čitljivost panela ──────────────────────────────────────────────────
+
+section("8. Panel je čitljiv — neprovidna podloga (2026-10-07 screenshot)");
+{
+	storage.clear();
+	resetHooks();
+	const tree = render("conversation.input.left", "composer-extras-context-guard", {
+		sessionId: "session-style",
+		useProjection: () => ({ pressureTokens: GUARD_AT + 1000, contextWindow: WINDOW }),
+	});
+	const style = (guardTag(tree, true).props.style) || {};
+	const background = String(style.background || "");
+	// `--dsw-specific-menu` je u svetloj temi `#f8f9fa94` (58% alfa) i u core-u
+	// ide uz backdrop-filter — bez toga se tekst iza panela providi.
+	check("podloga NE koristi poluprovidni `--dsw-specific-menu`",
+		!background.includes("specific-menu"), background);
+	check("podloga je neprovidni `--dsw-alias-bg-base` (sa belim fallback-om)",
+		background.includes("--dsw-alias-bg-base") && background.includes("#fff"), background);
+	check("ima backdrop-filter kao pojas i šraf",
+		String(style.backdropFilter || "").includes("blur") && String(style.WebkitBackdropFilter || "").includes("blur"),
+		String(style.backdropFilter));
+	check("ima izražen obod za vidljivost (amber u senci)",
+		String(style.boxShadow || "").includes("245, 158, 11"), String(style.boxShadow));
+
+	const compact = buttons(tree)[1];
+	const compactStyle = compact.props.style || {};
+	check("Compact session je vizuelno primaran (amber obod + tint)",
+		String(compactStyle.border || "").includes("#f59e0b") &&
+		String(compactStyle.background || "").includes("245, 158, 11"),
+		`${compactStyle.border} / ${compactStyle.background}`);
+	const later = buttons(tree)[2];
+	check("Nastavi dalje je utišan (nema pozadine)",
+		String((later.props.style || {}).background) === "transparent",
+		String((later.props.style || {}).background));
 }
 
 // ───────────────────────────────────────────────────────────────── rezultat

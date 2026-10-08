@@ -77,8 +77,16 @@ function matchesSimple(el, part) {
 	return m[2] === undefined ? true : value === m[2];
 }
 
+/** Jedan deo selektora može da nosi VIŠE grupa: `[role="dialog"][aria-modal="true"]`. */
+function matchesPart(el, part) {
+	const trimmed = part.trim();
+	const groups = trimmed.match(/\[[^\]]*\]/g);
+	if (groups === null || groups.join("") !== trimmed) return false;
+	return groups.every((group) => matchesSimple(el, group));
+}
+
 function matches(el, selector) {
-	return selector.split(",").some((part) => matchesSimple(el, part));
+	return selector.split(",").some((part) => matchesPart(el, part));
 }
 
 function descendants(el) {
@@ -116,6 +124,13 @@ function makeElement(tag, attributes) {
 				node = node.parentElement;
 			}
 			return null;
+		},
+		hasAttribute(name) {
+			return el.attributes[name] !== undefined;
+		},
+		getClientRects() {
+			// `display: none` se u testu glumi preko `attributes.hidden`.
+			return el.attributes.hidden === undefined ? [{}] : [];
 		},
 		contains(other) {
 			let node = other;
@@ -550,6 +565,63 @@ reset();
 {
 	const tree = mount();
 	check("nema strelica", tree === null);
+}
+
+// ─────────────────── 10. otvoren picker / dijalog / meni — strelice se sklanjaju
+
+console.log("\n10. dok je picker (ili bilo koji modal) otvoren, strelica NEMA");
+reset();
+const overlaid = buildTranscript({
+	contentHeight: 6000,
+	viewportHeight: 600,
+	scrollTop: 5400,
+	rows: [
+		{ kind: "user", top: 0, height: 60 },
+		{ kind: "user", top: 5000, height: 60 },
+	],
+});
+{
+	let tree = mount();
+	check("bez overlay-a se strelice vide", tree !== null && badgeText(tree) === "2/2", String(badgeText(tree)));
+
+	// 1) Moj picker iz composer-extras: običan `position: fixed` div, dakle
+	//    NIJE `role="dialog"`, pa ga vidi samo oznaka `data-dsh-overlay-surface`.
+	const picker = makeElement("div", { "data-dsh-overlay-surface": "file-picker" });
+	check("oznaka pickera je prepoznata", mod.__test__.overlaySurfaceOpen(document) === true);
+	tree = refresh();
+	check("dok je picker otvoren, ne renderuje se ništa (nijedan dodir ne ide strelicama)", tree === null, String(tree));
+
+	allElements.splice(allElements.indexOf(picker), 1);
+	tree = refresh();
+	check("kad se picker zatvori, strelice se vraćaju", tree !== null);
+	check("badge je posle povratka i dalje tačan (2/2)", badgeText(tree) === "2/2", String(badgeText(tree)));
+
+	// 2) DSH-ov dijalog (`modalSelector` iz primitives-a).
+	const dialog = makeElement("div", { role: "dialog", "aria-modal": "true" });
+	tree = refresh();
+	check("dok je DSH dijalog otvoren, strelica nema", tree === null);
+	allElements.splice(allElements.indexOf(dialog), 1);
+
+	// 3) Meni (`role="menu"`), npr. selektor modela — isti tretman.
+	const menu = makeElement("div", { role: "menu" });
+	tree = refresh();
+	check("dok je meni otvoren, strelica nema", tree === null);
+	allElements.splice(allElements.indexOf(menu), 1);
+
+	// 4) Meni koji je ostao u DOM-u ali nije prikazan ne sme zauvek da sakrije
+	//    strelice.
+	const stale = makeElement("div", { role: "menu", hidden: "" });
+	check("skriven meni se ne računa kao otvoren overlay", mod.__test__.overlaySurfaceOpen(document) === false);
+	tree = refresh();
+	check("strelice se vide iako u DOM-u postoji skriven meni", tree !== null);
+	allElements.splice(allElements.indexOf(stale), 1);
+
+	// 5) Skrol i dalje radi posle sklanjanja/vraćanja.
+	tree = refresh();
+	press(tree, "up");
+	check("posle svega ▲ još uvek sleće na moju poruku (y=12)",
+		Math.round(overlaid.rows[1].getBoundingClientRect().top) === 12,
+		String(overlaid.rows[1].getBoundingClientRect().top));
 }
 
 // ─────────────────────────────────────────────────────────────── rezime

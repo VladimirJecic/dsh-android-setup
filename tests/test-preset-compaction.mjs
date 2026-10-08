@@ -106,6 +106,9 @@ for (const preset of ["preset-standard", "preset-ptc", "preset-cordis"]) {
 	})();
 	check(`${preset}: compaction-basic ima thresholdRatio ${RATIO}`, thresholdOf(innerBlock) === RATIO,
 		`dobio ${String(thresholdOf(innerBlock))}`);
+	check(`${preset}: auto-compact je ISKLJUČEN (auto: false)`,
+		innerBlock !== null && innerBlock.some((line) => line.trim() === "auto: false"),
+		innerBlock === null ? "nema bloka" : innerBlock.join(" | "));
 }
 {
 	const minimal = rowBlock("preset-minimal", 0);

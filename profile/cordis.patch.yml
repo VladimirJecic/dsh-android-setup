@@ -37,14 +37,18 @@
 
 # >>> preset-compaction (auto-generisano; ne edituj rucno — pokreni preset-compaction-sync.py) >>>
 #
-# Auto-compact na 60% konteksta (default dsh je 0.8).
+# AUTO-COMPACT JE ISKLJUCEN (`auto: false`): dsh nikad ne kompaktuje sam.
+# Kompakciju pokrece ISKLJUCIVO korisnik — `/compact` iz komande trake ili
+# dugme Compact session u context guard-u (dsh-composer-extras), koje se
+# pali kao PREDLOG na 50% konteksta. `thresholdRatio` je tu samo da prag
+# bude 60% ako se auto ikada ponovo ukljuci.
 #
-# Red `compaction-basic` u web profilu je disabled, pa se prag menja na
+# Red `compaction-basic` u web profilu je disabled, pa se config menja na
 # deklaraciji svakog agent preseta. Patch sa `id` zamenjuje `config` celog
 # reda (nikad se ne spaja dubinski), zato je ovaj blok pun - generise ga
 # ~/dsh/preset-compaction-sync.py iz instaliranog dsh-web-app bundle-a.
 #
-# threshold = min(window x ratio, window - maxTokens - 65536 headroom):
+# thresholdRatio = 0.6 -> min(window x ratio, window - maxTokens - 65536):
 #   deepseek-flash      (1.000.000): min(600000, 678464) = 600000 = 60%
 #   gemini-flash-lite   (1.048.576): min(629145, 950272) = 629145 = 60%
 #
@@ -117,6 +121,7 @@
           - id: compaction-basic
             name: '@deepseek-ai/dsh-compaction-basic'
             config:
+              auto: false
               thresholdRatio: 0.6
           - id: command-compact
             name: '@deepseek-ai/dsh-command-compact'
@@ -262,6 +267,7 @@
           - id: compaction-basic
             name: '@deepseek-ai/dsh-compaction-basic'
             config:
+              auto: false
               thresholdRatio: 0.6
           - id: command-compact
             name: '@deepseek-ai/dsh-command-compact'
@@ -412,6 +418,7 @@
           - id: compaction-basic
             name: '@deepseek-ai/dsh-compaction-basic'
             config:
+              auto: false
               thresholdRatio: 0.6
           - id: command-compact
             name: '@deepseek-ai/dsh-command-compact'
@@ -489,8 +496,7 @@
         name: '@deepseek-ai/dsh-skill-filesystem'
         config:
           customSkillDirs:
-            - !!js process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@deepseek-ai/dsh-agent-preset/package.json')),
-              'skills')
+            - !!js process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@deepseek-ai/dsh-agent-preset/package.json')), 'skills')
       - id: tool-skill
         name: '@deepseek-ai/dsh-tool-skill'
       - id: present
@@ -498,5 +504,4 @@
       - id: tool-plugin-manager
         name: '@deepseek-ai/dsh-plugin-manager/tools'
         disabled: !!js "!ctx.get('profileContext')"
-
 # <<< preset-compaction <<<

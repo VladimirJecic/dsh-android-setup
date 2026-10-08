@@ -1,4 +1,4 @@
-# DSH Termux — restore arhiva (2026-10-07)
+# DSH Termux — restore arhiva (folder 2026-10-07, sadržaj osvežen 2026-10-08)
 
 > Arhiva je osvežena **2026-10-07** (datum joj je u imenu foldera):
 > **ujedinjen restart** (jedina komanda `restart-dsh`, skill + GUI komanda nad
@@ -8,7 +8,13 @@
 > put objavljena na GitHub
 > (**https://github.com/VladimirJecic/dsh-android-setup.git**). Prethodna
 > osnova (dsh **0.2.0-rc.2**, `dsh-update.sh` sa **10 faza**, odloženi restart
-> sa auto-rollback-om) i dalje važi; dokazi: `SANDBOX-DOKAZ-0.2.0-rc.2.md`.
+> sa auto-rollback-om) i dalje važi.
+>
+> **Osveženo 2026-10-08:** novi plugin **`dsh-chat-jump-arrows`** (▲▼ kroz moje
+> poruke), smart mode više **ne prebacuje model dok je kontekst nepoznat**
+> (fail-closed), popravljen `gemini-catalog-update.py` (`!!js` tag je obarao
+> osvežavanje kataloga pri startu), i arhiva je očišćena od istorijskih
+> planova/promptova/dokaza koji nisu uputstvo.
 
 Sve što treba da se vrati DSH setup na telefon posle reinstalacije / brisanja
 `~/.dsh`. **Arhiva NE sadrži API ključeve** — oni se unose ručno (korak 9).
@@ -75,20 +81,17 @@ bash ~/storage/shared/Download/DSH-Restore-20261007/restore.sh             # pri
 |---|---|
 | `restore.sh` | pokreće se odavde (`--dry-run` ili primena) |
 | `dsh/*.py`, `dsh/*.sh`, `dsh/*.mjs`, `dsh/*.cjs` | `~/dsh/` — uključuje **`dsh-update.sh`** (ručni updater, 10 faza), **`compat-scan.mjs`**, **`.restart-after-update.sh`** (odloženi restart + auto-rollback), `cache-report.py`, `session-turn-state.py`, `resume-after-restart.sh`, **`make-restore-archive.sh`** (pakovanje ove arhive) |
-| `dsh/dsh-composer-extras/` | `~/dsh/dsh-composer-extras/` — **osveženo 2026-10-07**: `/restart-dsh` komanda (poziva skill skript), **smart se sam pali za praznu novu sesiju**; ranije: 📤 Podeli / 📂 Folder, multi-select + 🗑️, SMART branch (`branch-session`, `branch-info`, `prompt-session`) |
+| `dsh/dsh-composer-extras/` | `~/dsh/dsh-composer-extras/` — **osveženo 2026-10-08**: `/restart-dsh` komanda (poziva skill skript), smart se sam pali za praznu novu sesiju i **ne prebacuje model na Gemini dok je kontekst nepoznat**; file-picker nosi `data-dsh-overlay-surface` (ugovor sa strelicama); ranije: 📤 Podeli / 📂 Folder, multi-select + 🗑️, SMART branch (`branch-session`, `branch-info`, `prompt-session`) |
+| `dsh/dsh-chat-jump-arrows/` | `~/dsh/dsh-chat-jump-arrows/` — **novo 2026-10-08**: ▲▼ lebdeće strelice (`shell.overlay`) kroz MOJE poruke; sklanjaju se dok je otvoren picker/dijalog/meni |
 | `bin/dsh-termux` | `~/.local/bin/dsh-termux` |
 | `profile/package.json`, `profile/cordis.patch.yml` | `~/.dsh/profiles/web/` — model, Gemini katalog, welcome-notice |
 | `skills/*` (10 komada) | `~/.dsh/skills/` — `branch-into-new-session` (+`branch.sh`), `burn-subtitle`, `kljucne-reci-nemacki`, `partial-prevod`, **`restart-dsh` (+`restart-dsh.sh` — jedina implementacija restarta)**, `solid`, `uplati` (+`uplati.py`), `voice-input`, `wa-message`, `wa-message-audio` |
 | `dsh-home/AGENTS.md` | `~/.dsh/AGENTS.md` — **user-global uputstva, dobija ih SVAKA sesija** |
 | `PRAVILA-DSH.md` | **novo 2026-10-07**: konsolidovana pravila celog setup-a (restart, smart, sesije, pluginovi, tajne, update, Android zamke, arhiva, git) |
-| `DSH-Termux-Kompletno-Uputstvo.md` | kompletno uputstvo (i u `~/dsh/`) — **osveženo 2026-10-07** (`/restart-dsh`, smart pravilo) |
-| `SANDBOX-DOKAZ-0.2.0-rc.2.md` | **novo**: koffi zamka, 10 faza, sandbox dokazi, plugin na 0.2.0, odloženi restart |
-| `SANDBOX-DOKAZ-tooluse-fix.md` | tool_use redosled (3f) — dokaz i ispravljena koffi napomena |
-| `DIJAGNOZA-gemini-deepseek-tool-use.md` | dijagnoza `tool_use ids without tool_result` |
+| `DSH-Termux-Kompletno-Uputstvo.md` | kompletno uputstvo (i u `~/dsh/`) — **osveženo 2026-10-08** (`/restart-dsh`, smart fail-closed, `dsh-chat-jump-arrows`) |
 | `UPUTSTVO-dodatak-dugmad.md` | dodatak: 📤/📂/☑️/🗑️ (rute, zamke, restore) |
-| `PLAN-composer-extras.md`, `PWA-AUTH-FIX.md`, `PROMPT-*.md`, `clear-context.md` | istorijski planovi/promptovi (referenca) |
-| `tests/*.mjs` | `~/dsh/tests/` — **novo 2026-10-07**: `test-composer-extras-smart-default.mjs` (11 provera smart pravila) i `test-composer-extras-context-guard.mjs`. Pokreće se sa `node tests/<fajl>.mjs` iz korena arhive (isti relativni put kao u `~/dsh`). |
-| `_originali/` | originalni fajlovi od 2026-09-15, za referencu |
+| `UPUTSTVO-strelice.md` | dodatak: ▲▼ strelice kroz moje poruke (šta rade, gde sede, kad se sklanjaju) |
+| `tests/*.mjs`, `tests/*.py` | `~/dsh/tests/` — regresija pravila: `test-composer-extras-smart-default.mjs`, `test-composer-extras-context-guard.mjs`, `test-preset-compaction.mjs`, `test-chat-jump-arrows.mjs` (`node`) i `test-gemini-catalog-update.py` (`python3`). Pokreću se iz korena arhive (isti relativni put kao u `~/dsh`). |
 
 ## Šta NIJE u arhivi (i zašto)
 
@@ -200,7 +203,8 @@ boot smoke test na izolovanom `DSH_HOME` i slobodnom portu 3089–3092) → atom
 zamena (`mv` stare instalacije u
 `<global-root>/.dsh-backup-<verzija>-<timestamp>`, pa `mv` sandboxa na njeno
 mesto) → čišćenje sandboxa. **Bilo koja greška pre faze 7 ostavlja staru
-instalaciju netaknutu.** Detalji: `SANDBOX-DOKAZ-0.2.0-rc.2.md`.
+instalaciju netaknutu.** Izvor istine za faze je sam `~/dsh/dsh-update.sh`
+(`--dry-run` ispiše plan pre ijedne izmene).
 
 ### Aktivacija — odloženi restart
 

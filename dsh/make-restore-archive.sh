@@ -8,7 +8,8 @@
 #
 # Šta radi:
 #   1. uzme prethodnu arhivu kao osnovu (restore.sh, README-RESTORE.md, README.md,
-#      .gitignore, _originali/) — ali NE i njen `.git`
+#      .gitignore) — ali NE i njen `.git`. Obrisani fajlovi se NE vraćaju:
+#      osvežavanje u mestu ništa ne briše, a `git rm` u arhivi je trajan.
 #   2. osveži iz živog sistema: skripte, plugin, launcher, profil, AGENTS.md, skills, tests, docs
 #   3. prepiše ime arhive u putanjama (stari datum -> novi)
 #   4. spakuje u <ime>.zip (python zipfile — `zip` na Termuxu nije instaliran)
@@ -64,14 +65,20 @@ done
 say "[ok] dokumentacija iz ~/dsh: $copied fajlova"
 
 # Operativne skripte u arhivi/dsh/
+# 2026-10-08: probe-skripte iz septembra (`.restart-branch-route.sh`,
+# `.restart-for-branchinfo.sh`, `.restart-plugin-fix.sh`,
+# `.restart-when-idle.sh`, `.smart-start-test.sh`, `.smart-test-prompt.md`,
+# `run-headless-buttons.sh`) su izbačene — bile su jednokratne probe, ne
+# uputstvo; `restart-dsh` skill je jedini restart.
+# Dodat i `preset-compaction-sync.py`: PRAVILA §12/§13 upućuju na njega, a
+# arhiva ga do sad nije nosila (restore bi ostavio dokumentovanu komandu bez
+# skripte).
 SCRIPTS=(
 	patch-android-dsh.py dsh-update.sh compat-scan.mjs gemini-catalog-update.py
 	dsh-rescue.sh dsh-url.sh no-hardlink.cjs restore-patches.sh
 	cache-report.py session-turn-state.py resume-after-restart.sh
-	run-headless-buttons.sh make-restore-archive.sh
-	.restart-after-update.sh .smart-start-test.sh .smart-test-prompt.md
-	.restart-branch-route.sh .restart-for-branchinfo.sh .restart-plugin-fix.sh
-	.restart-when-idle.sh
+	preset-compaction-sync.py make-restore-archive.sh
+	.restart-after-update.sh
 )
 missing=0
 for f in "${SCRIPTS[@]}"; do
@@ -119,11 +126,11 @@ say "[ok] skills: $(ls "$NEW/skills" | wc -l) komada ($(ls "$NEW/skills" | tr '\
 
 # --- 4a) testovi (dokumentuju pravila iz PRAVILA-DSH.md) ---------------------
 # `tests/*.mjs` čitaju `../dsh-composer-extras/client.js`, pa ista putanja radi
-# i u ~/dsh/tests i u arhivi/tests.
+# i u ~/dsh/tests i u arhivi/tests. `test-gemini-catalog-update.py` je python3.
 if [ -d "$H/dsh/tests" ]; then
 	rm -rf "$NEW/tests"
 	mkdir -p "$NEW/tests"
-	cp -p "$H"/dsh/tests/*.mjs "$NEW/tests/" 2>/dev/null
+	cp -p "$H"/dsh/tests/*.mjs "$H"/dsh/tests/*.py "$NEW/tests/" 2>/dev/null
 	say "[ok] tests: $(ls "$NEW/tests" 2>/dev/null | wc -l) komada"
 fi
 
@@ -141,7 +148,7 @@ if [ -n "$PREVDATE" ] && [ "$PREVDATE" != "$DATE" ]; then
 		if grep -q "DSH-Restore-$PREVDATE" "$f" 2>/dev/null; then
 			sed -i "s/DSH-Restore-$PREVDATE/DSH-Restore-$DATE/g" "$f" && n=$((n + 1))
 		fi
-	done < <(find "$NEW" -path "$NEW/_originali" -prune -o \
+	done < <(find "$NEW" -path "$NEW/.git" -prune -o \
 		\( -name '*.md' -o -name '*.sh' -o -name '*.py' -o -name '*.yml' \) -type f -print)
 	say "[ok] putanje prepisane ($PREVDATE -> $DATE) u $n fajlova"
 

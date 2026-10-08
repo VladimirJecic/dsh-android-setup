@@ -32,6 +32,11 @@ Ponašanje:
   **jednom ispravi** poziciju — ali samo dok se skrol smiri i samo ako nisi
   dirao ekran; svaki tvoj gest otkazuje ispravku.
 - U pogledima bez chat transkripta (npr. Trajectory) strelica nema.
+- **Dok je otvoren picker / dijalog / meni, strelica nema uopšte** (od
+  2026-10-08). Sloj strelica stoji iznad composera, pa bi inače lebdele preko
+  „Dodaj u kontekst" pickera i kradle dodire — 🗑️ se teško klikne, a prevlačenje
+  preko kartice skroluje transkript iza nje. Čim se picker zatvori, strelice se
+  vraćaju na isto mesto sa istim `n/m`.
 
 ## Ako se ne pojave
 
@@ -39,5 +44,6 @@ Ponašanje:
    hot-reload-uje klijentske bundlove).
 2. Nova plugina traži **restart**: `/restart-dsh` iz „+" menija (ili skill).
 3. Provera da je dsh živ: `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3081`.
-4. Offline dokaz logike (bez browsera): `node ~/dsh/tests/test-chat-jump-arrows.mjs`
-   (43 provere).
+4. Ako ih nema samo dok je nešto otvoreno — to je namerno (vidi gore).
+5. Offline dokaz logike (bez browsera): `node ~/dsh/tests/test-chat-jump-arrows.mjs`
+   (53 provere).
