@@ -18,7 +18,7 @@
 #   github.com/VladimirJecic/dsh-android-setup  (branch master)
 # Posle pravljenja nove arhive: `cd` u nju, `git init -b master`, `git remote add
 # origin <url>`, `git fetch`, `git reset --mixed origin/master`, `git add -A`,
-# `git commit`, `git push`. Detalji: PRAVILA-DSH.md, sekcija 10.
+# `git commit`, `git push`. Detalji: rules/07-restore-i-git.md.
 #
 # NE uzima: tajne (~/.config/dsh-secrets.env, .credentials.yaml), sesije, logove,
 # .bak fajlove, screenshot-ove, __pycache__, node_modules.
@@ -56,7 +56,8 @@ mkdir -p "$NEW"/{bin,dsh,dsh-home,profile,skills}
 PREVDATE="$(basename "${PREV:-DSH-Restore-}" | sed 's/DSH-Restore-//')"
 
 # --- 2) skripte --------------------------------------------------------------
-# Dokumentacija koja živi u ~/dsh (uključujući kompletno uputstvo) ide u koren arhive.
+# Dokumentacija koja živi u ~/dsh (uključujući kompletno uputstvo i indeks
+# PRAVILA-DSH.md) ide u koren arhive.
 shopt -s nullglob
 copied=0
 for f in "$H"/dsh/*.md; do
@@ -64,13 +65,22 @@ for f in "$H"/dsh/*.md; do
 done
 say "[ok] dokumentacija iz ~/dsh: $copied fajlova"
 
+# Pravila su od 2026-10-08 podeljena po temama u ~/dsh/rules/ → arhiva/rules/.
+# Ceo folder se osvežava (rm -rf) da obrisan fajl pravila ne ostane u arhivi.
+if [ -d "$H/dsh/rules" ]; then
+	rm -rf "$NEW/rules"
+	mkdir -p "$NEW/rules"
+	cp -p "$H"/dsh/rules/*.md "$NEW/rules/" 2>/dev/null
+	say "[ok] pravila: $(ls "$NEW/rules" 2>/dev/null | wc -l) fajlova ($(ls "$NEW/rules" 2>/dev/null | tr '\n' ' '))"
+fi
+
 # Operativne skripte u arhivi/dsh/
 # 2026-10-08: probe-skripte iz septembra (`.restart-branch-route.sh`,
 # `.restart-for-branchinfo.sh`, `.restart-plugin-fix.sh`,
 # `.restart-when-idle.sh`, `.smart-start-test.sh`, `.smart-test-prompt.md`,
 # `run-headless-buttons.sh`) su izbačene — bile su jednokratne probe, ne
 # uputstvo; `restart-dsh` skill je jedini restart.
-# Dodat i `preset-compaction-sync.py`: PRAVILA §12/§13 upućuju na njega, a
+# Dodat i `preset-compaction-sync.py`: pravila (05/03) upućuju na njega, a
 # arhiva ga do sad nije nosila (restore bi ostavio dokumentovanu komandu bez
 # skripte).
 SCRIPTS=(
@@ -124,7 +134,7 @@ for s in "$H/.dsh/skills"/*; do
 done
 say "[ok] skills: $(ls "$NEW/skills" | wc -l) komada ($(ls "$NEW/skills" | tr '\n' ' '))"
 
-# --- 4a) testovi (dokumentuju pravila iz PRAVILA-DSH.md) ---------------------
+# --- 4a) testovi (dokumentuju pravila iz rules/) -----------------------------
 # `tests/*.mjs` čitaju `../dsh-composer-extras/client.js`, pa ista putanja radi
 # i u ~/dsh/tests i u arhivi/tests. `test-gemini-catalog-update.py` je python3.
 if [ -d "$H/dsh/tests" ]; then

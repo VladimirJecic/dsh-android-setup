@@ -215,7 +215,7 @@ window.__ModuleLoader__.load({
 		 * (0.25 i 0.05) su istog dana koristile SAMO kao privremeni test da se
 		 * novi modal vidi odmah; vraćene su na 0.5 i ne spuštaju se više.
 		 * Ako se modal ikad bude testirao, koristi `panel-preview.html`, a NE
-		 * spuštanje praga (vidi PRAVILA-DSH.md §13).
+		 * spuštanje praga (vidi rules/03-kontekst-i-kompakcija.md).
 		 *
 		 * Sa 1M prozorom: prag = min(500.000, 1.000.000 × 0.5) = 500.000 (50%).
 		 *

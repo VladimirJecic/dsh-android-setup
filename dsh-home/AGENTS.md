@@ -1,5 +1,18 @@
 # Globalne instrukcije
 
+## Pravila ovog setup-a (`~/dsh/rules/`)
+
+Odluke koje se ne smeju pogaziti (restart, klijentski bundle i refresh, modeli,
+smart mode, kontekst/kompaktacija, instalacija, održavanje, pluginovi, arhiva i
+git, tajne) su **podeljena po temama u `~/dsh/rules/`**.
+
+- Indeks + TL;DR: **`~/dsh/rules/README.md`** — pročitaj ga pre nego što diraš
+  restart, profile, plugin, update ili arhivu.
+- Ako se pravilo i kod razilaze, **kod je istina**; ispravi odgovarajući fajl u
+  `~/dsh/rules/` (nikad `PRAVILA-DSH.md`, on je samo mapa).
+- Restart je jedna komanda (`restart-dsh` skill); nikad ručni `pkill`/`nohup`, i
+  nikad restart živog dsh bez izričite dozvole korisnika.
+
 ## „uplati" = `uplati` skill
 
 Kada korisnik kaže **„uplati"**, **„uplata"**, „plati", „pošalji pare" ili

@@ -4,8 +4,8 @@
 > **ujedinjen restart** (jedina komanda `restart-dsh`, skill + GUI komanda nad
 > istim skriptom; ukinut dupli `/restart`), **prazna nova sesija (`+`) je
 > ponovo smart po defaultu** (postojeći razgovori nisu), dodat je
-> **`PRAVILA-DSH.md`** — konsolidovana pravila celog setup-a, i arhiva je prvi
-> put objavljena na GitHub
+> **`PRAVILA-DSH.md`** (danas podeljen u **`rules/`**) — pravila celog setup-a, i
+> arhiva je prvi put objavljena na GitHub
 > (**https://github.com/VladimirJecic/dsh-android-setup.git**). Prethodna
 > osnova (dsh **0.2.0-rc.2**, `dsh-update.sh` sa **10 faza**, odloženi restart
 > sa auto-rollback-om) i dalje važi.
@@ -19,10 +19,10 @@
 Sve što treba da se vrati DSH setup na telefon posle reinstalacije / brisanja
 `~/.dsh`. **Arhiva NE sadrži API ključeve** — oni se unose ručno (korak 9).
 
-> 📌 **Pravila su sada konsolidovana u `PRAVILA-DSH.md`** (u korenu arhive) —
-> restart, smart mode, sesije, pluginovi, tajne, update, Android zamke, arhiva
-> i git. Ako se ovaj README i `PRAVILA-DSH.md` razilaze, `PRAVILA-DSH.md` je
-> noviji; ako se i on razilazi sa kodom, **kod je istina**.
+> 📌 **Pravila su podeljena po temama u `rules/`** (od 2026-10-08) — indeks je
+> `rules/README.md`, a `PRAVILA-DSH.md` u korenu je samo mapa starih sekcija.
+> Ako se ovaj README i `rules/` razilaze, `rules/` su noviji; ako se i oni
+> razilaze sa kodom, **kod je istina**.
 
 
 ## ⚠️ NIKAD ne pokretati `dsh plugin` / pnpm dok dsh RADI
@@ -87,7 +87,8 @@ bash ~/storage/shared/Download/DSH-Restore-20261007/restore.sh             # pri
 | `profile/package.json`, `profile/cordis.patch.yml` | `~/.dsh/profiles/web/` — model, Gemini katalog, welcome-notice |
 | `skills/*` (10 komada) | `~/.dsh/skills/` — `branch-into-new-session` (+`branch.sh`), `burn-subtitle`, `kljucne-reci-nemacki`, `partial-prevod`, **`restart-dsh` (+`restart-dsh.sh` — jedina implementacija restarta)**, `solid`, `uplati` (+`uplati.py`), `voice-input`, `wa-message`, `wa-message-audio` |
 | `dsh-home/AGENTS.md` | `~/.dsh/AGENTS.md` — **user-global uputstva, dobija ih SVAKA sesija** |
-| `PRAVILA-DSH.md` | **novo 2026-10-07**: konsolidovana pravila celog setup-a (restart, smart, sesije, pluginovi, tajne, update, Android zamke, arhiva, git) |
+| `PRAVILA-DSH.md` | **od 2026-10-08 samo mapa**: indeks i tabela starih sekcija → `rules/` |
+| `rules/*.md` | **novo 2026-10-08**: pravila podeljena po temama — `README.md` (indeks + TL;DR), `01-sesije.md`, `02-smart-mode.md`, `03-kontekst-i-kompakcija.md`, `04-instalacija.md`, `05-odrzavanje.md`, `06-pluginovi.md`, `07-restore-i-git.md`, `08-tajne.md` → `~/dsh/rules/` |
 | `DSH-Termux-Kompletno-Uputstvo.md` | kompletno uputstvo (i u `~/dsh/`) — **osveženo 2026-10-08** (`/restart-dsh`, smart fail-closed, `dsh-chat-jump-arrows`) |
 | `UPUTSTVO-dodatak-dugmad.md` | dodatak: 📤/📂/☑️/🗑️ (rute, zamke, restore) |
 | `UPUTSTVO-strelice.md` | dodatak: ▲▼ strelice kroz moje poruke (šta rade, gde sede, kad se sklanjaju) |

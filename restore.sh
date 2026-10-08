@@ -115,6 +115,12 @@ done
 for f in DSH-Termux-Kompletno-Uputstvo.md PRAVILA-DSH.md UPUTSTVO-strelice.md UPUTSTVO-dodatak-dugmad.md; do
   [ -f "$SRC/$f" ] && copy_in "$SRC/$f" "$H/dsh/$f"
 done
+# Pravila su od 2026-10-08 podeljena po temama (rules/*.md) — indeks je
+# rules/README.md, a PRAVILA-DSH.md u korenu je samo mapa starih sekcija.
+do_run "mkdir -p '$H/dsh/rules'"
+for f in "$SRC"/rules/*.md; do
+  [ -f "$f" ] && copy_in "$f" "$H/dsh/rules/$(basename "$f")"
+done
 say
 
 say "2. lokalni pluginovi"

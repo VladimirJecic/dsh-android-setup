@@ -991,7 +991,7 @@ node ~/dsh/tests/test-chat-jump-arrows.mjs      # 53 provere, offline
 bash ~/.dsh/skills/restart-dsh/restart-dsh.sh
 ```
 
-Puna dokumentacija: `UPUTSTVO-strelice.md`; pravila: `PRAVILA-DSH.md` §5.
+Puna dokumentacija: `UPUTSTVO-strelice.md`; pravila: `rules/06-pluginovi.md`.
 
 ## 10. Brza tabela problema
 
