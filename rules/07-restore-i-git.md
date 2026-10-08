@@ -16,15 +16,14 @@
   nego kroz git, pa se **osvežava u mestu**. Nema kopiranja prethodne arhive, ni
   prepisivanja datuma u putanjama, ni „novi datum = novi folder" — time je otpao
   i najveći deo zakomplikovanosti stare skripte.
-- Postoji i `DSH-Restore.zip` — **samo prenosivi snapshot** (bez `.git`) za
-  `SHARE=1`/share sheet. Istorija i remote žive u git-u.
+- **Zip je ukinut 2026-10-08:** `make-restore-archive.sh` više **ne pravi**
+  `DSH-Restore.zip` (nema ni `NOZIP`/`SHARE`). Deljenje i istorija idu isključivo
+  kroz git — zip je bio samo prenosivi snapshot bez `.git`, tj. dupliranje istine.
 
 ## Pakovanje (`make-restore-archive.sh`)
 
 ```bash
-bash ~/dsh/make-restore-archive.sh            # osveži folder + .zip
-NOZIP=1 bash ~/dsh/make-restore-archive.sh    # samo folder
-SHARE=1 bash ~/dsh/make-restore-archive.sh    # + Android share sheet
+bash ~/dsh/make-restore-archive.sh                          # osveži folder
 DSH_RESTORE_DL=/drugi/Download bash ~/dsh/make-restore-archive.sh
 ```
 

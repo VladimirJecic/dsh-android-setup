@@ -1,9 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # make-restore-archive.sh — osveži DSH restore arhivu iz ŽIVOG sistema i spakuj je.
 #
-#   bash ~/dsh/make-restore-archive.sh            # osveži + .zip
-#   NOZIP=1 bash ~/dsh/make-restore-archive.sh    # samo folder (bez .zip)
-#   SHARE=1 bash ~/dsh/make-restore-archive.sh    # + termux-share
+#   bash ~/dsh/make-restore-archive.sh            # osveži folder (bez .zip — imamo git)
 #   DSH_RESTORE_DL=... bash ~/dsh/make-restore-archive.sh   # drugi Download
 #
 # Arhiva je od 2026-10-08 JEDAN folder BEZ datuma:
@@ -37,7 +35,6 @@ set -uo pipefail
 
 DL="${DSH_RESTORE_DL:-/storage/emulated/0/Download}"
 NEW="$DL/DSH-Restore"
-ZIP="$DL/DSH-Restore.zip"
 BASE="$HOME/dsh/restore"
 H="$HOME"
 
@@ -160,38 +157,8 @@ if [ -d "$NEW/.git" ]; then
 	git -C "$NEW" status --short | sed 's/^/  /' | head -40
 fi
 
-# --- 7) zip ------------------------------------------------------------------
-if [ "${NOZIP:-0}" != 1 ]; then
-	say
-	say "pakujem $ZIP"
-	rm -f "$ZIP"
-	python3 - "$NEW" "$ZIP" <<'PY'
-import os, sys, zipfile
-root, out = sys.argv[1], sys.argv[2]
-base = os.path.dirname(root)
-n = 0
-with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-    for dirpath, dirnames, filenames in os.walk(root):
-        # `.git` NE ide u zip: arhiva je git repo, ali zip je samo prenosivi
-        # snapshot sadržaja, ne i istorijat/remote.
-        dirnames[:] = sorted(d for d in dirnames if d != ".git")
-        for fn in sorted(filenames):
-            full = os.path.join(dirpath, fn)
-            z.write(full, os.path.relpath(full, base))
-            n += 1
-print(f"  [ok] {out}  ({n} fajlova, {os.path.getsize(out)} B)")
-PY
-fi
-
-if [ "${SHARE:-0}" = 1 ] && [ -f "$ZIP" ]; then
-	say
-	say "otvaram Android share sheet (termux-share)…"
-	termux-share -a send -t "$(basename "$ZIP")" "$ZIP" \
-		|| say "  [!] termux-share nije uspeo — podeli fajl ručno: $ZIP"
-fi
-
 say
-say "gotovo: $NEW$([ "${NOZIP:-0}" != 1 ] && echo " + $ZIP")"
+say "gotovo: $NEW"
 if [ -d "$NEW/.git" ]; then
 	say "objavi:  cd \"$NEW\" && git add -A && git commit -m '<poruka>' && git push"
 fi

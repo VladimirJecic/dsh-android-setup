@@ -245,9 +245,7 @@ Ako treba samo vratiti `~/dsh` skripte i zakrpe (bez promene verzije):
 ## Osvežavanje arhive (posle svake promene setup-a)
 
 ```bash
-bash ~/dsh/make-restore-archive.sh          # osveži folder + .zip
-SHARE=1 bash ~/dsh/make-restore-archive.sh  # + Android share sheet
-NOZIP=1 bash ~/dsh/make-restore-archive.sh  # samo folder (bez .zip)
+bash ~/dsh/make-restore-archive.sh          # osveži folder (bez .zip — imamo git)
 ```
 
 - Arhiva je **jedan folder bez datuma** (`/storage/emulated/0/Download/DSH-Restore`)
@@ -259,8 +257,8 @@ NOZIP=1 bash ~/dsh/make-restore-archive.sh  # samo folder (bez .zip)
   **obrisan fajl nestaje i iz arhive**, a svako pokretanje daje isto stanje.
 - Bazni fajlovi arhive (`restore.sh`, `README.md`, `README-RESTORE.md`,
   `.gitignore`) žive u **`~/dsh/restore/`** — tu ih menjaj, ne u arhivi.
-- `.zip` (`DSH-Restore.zip`) je samo prenosivi snapshot (bez `.git`), za share
-  sheet; istorija i remote žive u git-u.
+- **Zip je ukinut 2026-10-08** — skript više ne pravi `DSH-Restore.zip`
+  (nema `NOZIP`/`SHARE`); arhiva se deli i verzionira isključivo kroz git.
 - Objava: `cd /storage/emulated/0/Download/DSH-Restore && git add -A && git commit -m '…' && git push`.
   Skript na kraju ispiše `git status --short`, pa se odmah vidi šta se promenilo.
   Puna pravila: `~/dsh/rules/07-restore-i-git.md`.

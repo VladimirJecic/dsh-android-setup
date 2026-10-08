@@ -52,8 +52,8 @@ i pravi symlink `~/.dsh/profiles/node_modules/dsh-composer-extras -> ~/dsh/dsh-c
 
 > **Kopija plugina u arhivi je osvežena 2026-10-06** (sadrži i SMART branch /
 > `prompt-session` rute). Ako plugin menjaš posle toga, arhivu osveži jednim
-> potezom — `bash ~/dsh/make-restore-archive.sh` (uzme žive fajlove, prepiše
-> datum u putanjama i spakuje `.zip`).
+> potezom — `bash ~/dsh/make-restore-archive.sh` (uzme žive fajlove i osveži
+> folder `DSH-Restore` u mestu; **zip se ne pravi** — deljenje ide kroz git).
 
 ## 5. Poznato / istorija
 
