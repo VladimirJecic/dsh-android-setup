@@ -191,12 +191,12 @@ window.__ModuleLoader__.load({
 
 		/**
 		 * Prag sa kojim se poredi TRENUTNA zauzetost konteksta (isti broj koji
-		 * crta ContextMeter u donjem desnom uglu — `projectedTokens` /
-		 * `contextWindow`), a NE kumulativna potrošnja sesije iz Token usage
-		 * panela. To su dva različita broja:
+		 * crta ContextMeter — `projectedTokens` / `contextWindow`; na telefonu
+		 * sedi u stats traci na dnu, ispod composera), a NE kumulativna
+		 * potrošnja sesije iz Token usage panela. To su dva različita broja:
 		 *   - Token usage panel = sabrana naplaćena potrošnja kroz CEO log
 		 *     sesije (uncached + cache read + output, preko svih zahteva);
-		 *   - kružić u uglu = veličina prompta SLEDEĆEG zahteva / prozor modela.
+		 *   - kružić u stats traci = veličina prompta SLEDEĆEG zahteva / prozor.
 		 * Kompakcija i grananje imaju smisla samo na ovom drugom broju.
 		 *
 		 * Podrazumevano 500.000 (50% prozora od 1M za deepseek-flash). DSH-ova
@@ -367,7 +367,8 @@ window.__ModuleLoader__.load({
 		 * Sesija koja je prerasla Gemini free tier.
 		 *
 		 * Kvota koja je ovde pucala je `generate_content_free_tier_input_token_count`
-		 * = 250.000 INPUT tokena u minuti (vidi DIJAGNOZA-gemini-deepseek-tool-use.md).
+		 * = 250.000 INPUT tokena u minuti (dijagnoza je bila u
+		 * `DIJAGNOZA-gemini-deepseek-tool-use.md`, uklonjenom iz arhive 2026-10-08).
 		 * Zahtev čiji je kontekst veći od toga ne može da prođe NIJEDNOM, bez obzira
 		 * na to koliko je vremena prošlo od poslednjeg poziva — zato se smart mode
 		 * iznad ove granice sam isključuje, i to TAČNO u trenutku kada bi inače
