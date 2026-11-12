@@ -8,8 +8,9 @@
 #   bash ~/dsh/restore-patches.sh --check   # samo prikazi, nista ne menja
 #   bash ~/dsh/restore-patches.sh           # primeni
 #
-# Izvor je arhiva u ~/storage/shared/Download: `DSH-Restore` (bez datuma, od
-# 2026-10-08); razume i stari `DSH-Restore-<datum>` ako je ostao od ranije.
+# Izvor je arhiva u ~/storage/shared/Download: `dsh-android-setup` (isto ime kao
+# git repo; do 2026-11-12 se zvala `DSH-Restore`); razume i stari `DSH-Restore`
+# i `DSH-Restore-<datum>` ako su ostali od ranije.
 #
 # NE dira tajne (API kljuceve) — za to vidi restore.sh u korenu foldera.
 
@@ -18,8 +19,10 @@ set -uo pipefail
 DL="${DSH_RESTORE_DL:-/storage/emulated/0/Download}"
 SRC="${DSH_RESTORE_SRC:-}"
 if [ -z "$SRC" ]; then
-  # Prvo arhiva bez datuma (2026-10-08+), pa stari datumski folder ako postoji.
-  if [ -d "$DL/DSH-Restore/dsh" ]; then
+  # Prvo aktuelna arhiva (bez datuma), pa starija imena ako su ostala.
+  if [ -d "$DL/dsh-android-setup/dsh" ]; then
+    SRC="$DL/dsh-android-setup/dsh"
+  elif [ -d "$DL/DSH-Restore/dsh" ]; then
     SRC="$DL/DSH-Restore/dsh"
   else
     newest="$(ls -d "$DL"/DSH-Restore-*/ 2>/dev/null | sort | tail -1)"

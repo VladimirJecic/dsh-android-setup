@@ -1,6 +1,7 @@
-# DSH Termux — restore arhiva (`DSH-Restore`, bez datuma)
+# DSH Termux — restore arhiva (`dsh-android-setup`, bez datuma)
 
-> Arhiva je **jedan folder bez datuma** — `/storage/emulated/0/Download/DSH-Restore`
+> Arhiva je **jedan folder bez datuma** — `/storage/emulated/0/Download/dsh-android-setup`
+> (do 2026-11-12 se zvala `DSH-Restore`; ime je sada isto kao git repo)
 > (i git repo; osvežava se u mestu, pa joj datum u imenu ne treba):
 > **ujedinjen restart** (jedina komanda `restart-dsh`, skill + GUI komanda nad
 > istim skriptom; ukinut dupli `/restart`), **prazna nova sesija (`+`) je
@@ -59,8 +60,8 @@ Ručna provera: `python3 ~/dsh/patch-android-dsh.py --check`
 pkg install nodejs python ripgrep -y
 
 # 2. vrati setup iz arhive (restore.sh sam instalira dsh 0.2.0-rc.2 ako ga nema)
-bash ~/storage/shared/Download/DSH-Restore/restore.sh --dry-run   # pogledaj
-bash ~/storage/shared/Download/DSH-Restore/restore.sh             # primeni
+bash ~/storage/shared/Download/dsh-android-setup/restore.sh --dry-run   # pogledaj
+bash ~/storage/shared/Download/dsh-android-setup/restore.sh             # primeni
 
 # 3. unesi tajne (vidi korak 9 ispod)
 
@@ -240,7 +241,8 @@ Poslednji backup ostaje, pointer na njega je `<global-root>/.dsh-backup-latest`.
 
 Ako treba samo vratiti `~/dsh` skripte i zakrpe (bez promene verzije):
 `bash ~/dsh/restore-patches.sh` — **sam nađe arhivu** u
-`~/storage/shared/Download` (`DSH-Restore`, a razume i stari `DSH-Restore-<datum>`).
+`~/storage/shared/Download` (`dsh-android-setup`, a razume i stara imena
+`DSH-Restore` i `DSH-Restore-<datum>`).
 
 ## Osvežavanje arhive (posle svake promene setup-a)
 
@@ -248,7 +250,7 @@ Ako treba samo vratiti `~/dsh` skripte i zakrpe (bez promene verzije):
 bash ~/dsh/make-restore-archive.sh          # osveži folder (bez .zip — imamo git)
 ```
 
-- Arhiva je **jedan folder bez datuma** (`/storage/emulated/0/Download/DSH-Restore`)
+- Arhiva je **jedan folder bez datuma** (`/storage/emulated/0/Download/dsh-android-setup`)
   i **git repo**, pa se osvežava **u mestu** — nema više kopiranja prethodne
   arhive, ni prepisivanja datuma u putanjama, ni „novi datum = novi folder".
 - Sadržaj je **100% izveden iz živog sistema**: obriše se sve osim `.git`, pa se
@@ -257,9 +259,10 @@ bash ~/dsh/make-restore-archive.sh          # osveži folder (bez .zip — imamo
   **obrisan fajl nestaje i iz arhive**, a svako pokretanje daje isto stanje.
 - Bazni fajlovi arhive (`restore.sh`, `README.md`, `README-RESTORE.md`,
   `.gitignore`) žive u **`~/dsh/restore/`** — tu ih menjaj, ne u arhivi.
+- **Ime foldera = ime git repoa** (od 2026-11-12): `dsh-android-setup`.
 - **Zip je ukinut 2026-10-08** — skript više ne pravi `DSH-Restore.zip`
   (nema `NOZIP`/`SHARE`); arhiva se deli i verzionira isključivo kroz git.
-- Objava: `cd /storage/emulated/0/Download/DSH-Restore && git add -A && git commit -m '…' && git push`.
+- Objava: `cd /storage/emulated/0/Download/dsh-android-setup && git add -A && git commit -m '…' && git push`.
   Skript na kraju ispiše `git status --short`, pa se odmah vidi šta se promenilo.
   Puna pravila: `~/dsh/rules/07-restore-i-git.md`.
 

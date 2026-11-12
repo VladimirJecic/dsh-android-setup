@@ -88,6 +88,12 @@ _Loader.add_multi_constructor("!", _unknown_tag)
 # osvezavanje Gemini kataloga je tiho preskakano (2026-10-08).
 JS_TAG = "tag:yaml.org,2002:js"
 _Loader.add_multi_constructor(JS_TAG, _unknown_tag)
+# Isti problem za BILO KOJI buduci `!!<tag>` koji cordis uvede: standardni
+# tagovi (str/int/bool/map/seq/null...) su u `yaml_constructors` i hvataju se
+# PRE multi-konstruktora, pa ovaj prefiks hvata samo NEPOZNATE `!!<tag>`
+# vrednosti. Skripta ionako gleda samo OBLIK dokumenta, pa je bezbedno da
+# nepoznat tag ostane sirov string umesto da obori ceo start.
+_Loader.add_multi_constructor("tag:yaml.org,2002:", _unknown_tag)
 
 
 def _construct_mapping(loader, node, deep=False):

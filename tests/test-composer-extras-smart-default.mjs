@@ -152,6 +152,56 @@ let sessionPhase = "ready";
 const contexts = {};
 /** sessionId -> lažni SessionInputShell (jedan po sesiji, kao u dsh-u). */
 const inputs = {};
+/** sessionId -> draft; `submit()` ga troši, kao pravi composer. */
+const drafts = {};
+
+/**
+ * sessionId -> STABILAN lažni Session (`binding(id).session`) sa pravim
+ * `notifier.subscribe`-om. Bez toga se 429 put uopšte ne bi izvršavao, pa bi
+ * test tvrdio da fallback radi i kada je mrtav.
+ */
+const fakeSessions = {};
+function sessionFor(id) {
+	if (fakeSessions[id] === undefined) {
+		const listeners = new Set();
+		fakeSessions[id] = {
+			projections: {
+				faceOf: (key) => (key === "contextPressure"
+					? { getSnapshot: () => (contexts[id] === undefined ? undefined : { projectedTokens: contexts[id] }) }
+					: undefined),
+			},
+			lastAgentError: null,
+			notifier: {
+				subscribe: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
+			},
+			__listeners: listeners,
+		};
+	}
+	return fakeSessions[id];
+}
+
+/**
+ * Kao `api-session/error` -> `Session.handleAgentError(message)`: upiši grešku i
+ * obavesti pretplatnike (u dsh-u to radi `Notifier.markDirty` + mikrotask).
+ */
+async function emitAgentError(id, text) {
+	const session = sessionFor(id);
+	session.lastAgentError = text;
+	for (const fn of Array.from(session.__listeners)) fn();
+	for (let i = 0; i < 4; i += 1) await new Promise((r) => setTimeout(r, 0));
+}
+
+/** Tekst koji Google vraća na istrošenu free-tier kvotu (skraćeno, isti oblik). */
+function quotaError(quotaId = "GenerateContentInputTokensPerModelPerMinute-FreeTier", retry = "35.4", extra = "") {
+	return JSON.stringify({
+		error: {
+			code: 429,
+			status: "RESOURCE_EXHAUSTED",
+			message: "You exceeded your current quota. Please retry in " + retry + "s. " + extra,
+			details: [{ "@type": "type.googleapis.com/google.rpc.QuotaFailure", violations: [{ quotaId }] }],
+		},
+	});
+}
 
 function setContext(sessionId, tokens) {
 	if (tokens === undefined) delete contexts[sessionId];
@@ -200,17 +250,7 @@ const ctx = {
 	},
 	sessions: {
 		scope: (id) => ({ sessionId: id }),
-		binding: (id) => ({
-			session: {
-				projections: {
-					faceOf: (key) => (key === "contextPressure"
-						? { getSnapshot: () => (contexts[id] === undefined ? undefined : { projectedTokens: contexts[id] }) }
-						: undefined),
-				},
-				lastAgentError: null,
-				notifier: { subscribe: () => () => {} },
-			},
-		}),
+		binding: (id) => ({ session: sessionFor(id) }),
 		list: {
 			getSnapshot: () => ({ byId: sessionRows, ids: Object.keys(sessionRows), phase: sessionPhase }),
 		},
@@ -224,9 +264,13 @@ const ctx = {
 						const id = actx.sessionId;
 						if (inputs[id] === undefined) {
 							inputs[id] = {
-								setDraft() {},
-								getSnapshot: () => ({ draft: "" }),
-								submit(mode) { submits.push({ sessionId: id, mode }); },
+								setDraft(text) { drafts[id] = String(text); },
+								state: { getSnapshot: () => ({ draft: drafts[id] || "" }) },
+								getSnapshot: () => ({ draft: drafts[id] || "" }),
+								submit(mode) {
+									drafts[id] = ""; // pravi composer isprazni draft kad posalje
+									submits.push({ sessionId: id, mode });
+								},
 							};
 						}
 						return inputs[id];
@@ -319,6 +363,9 @@ function reset(sessionId) {
 	sessionPhase = "ready";
 	window.localStorage.clear();
 	for (const key of Object.keys(inputs)) delete inputs[key];
+	for (const key of Object.keys(drafts)) delete drafts[key];
+	for (const key of Object.keys(fakeSessions)) delete fakeSessions[key];
+	for (const key of Object.keys(contexts)) delete contexts[key];
 }
 
 console.log("\nSMART DEFAULT — prazna nova sesija vs. postojeci razgovor");
@@ -335,7 +382,10 @@ console.log("\nSMART DEFAULT — prazna nova sesija vs. postojeci razgovor");
 	check("prazna sesija: tooltip nije (off)", typeof titleOf(tree) === "string" && !titleOf(tree).includes("(off)"), String(titleOf(tree)));
 }
 
-// ── 2. prazna sesija dok host lista još nije stigla → NE ──────────────────
+// ── 2. prazna sesija dok host lista još nije stigla → NE odmah, ali NE ni ──
+//      trajno: odluka se ODLAŽE dok lista ne stigne (regresija 2026-10-08 —
+//      ranije je mount na sporom bootu trajno gasio smart praznoj sesiji, pa
+//      je sesija ostala na Gemini-ju bez iko da hendluje 429).
 {
 	const id = "session-blank-pending";
 	reset(id);
@@ -345,6 +395,25 @@ console.log("\nSMART DEFAULT — prazna nova sesija vs. postojeci razgovor");
 	const tree = await mount(id);
 	check("prazna + lista jos nije stigla: model NIJE diran", selects.length === 0, JSON.stringify(selects));
 	check("prazna + lista jos nije stigla: tooltip je (off)", typeof titleOf(tree) === "string" && titleOf(tree).includes("(off)"), String(titleOf(tree)));
+	check("prazna + lista jos nije stigla: cekanje je zakazano (nije trajni 'off')", timers.length > 0, String(timers.length));
+	sessionPhase = "ready"; // host lista je stigla dok je odluka još čekala
+	await runTimers();
+	check("prazna + lista stigne tokom cekanja: model ipak ide na Gemini", pickedGemini(), JSON.stringify(selects));
+}
+
+// ── 2b. prazna sesija, lista stigne a sesija NIJE prazna → trajno OFF ─────
+{
+	const id = "session-pending-then-history";
+	reset(id);
+	sessionRows = { [id]: { id, blank: true } };
+	sessionPhase = "pending";
+	setContext(id, undefined);
+	await mount(id);
+	sessionRows = { [id]: { id, blank: false } }; // host je javio da ipak ima istoriju
+	sessionPhase = "ready";
+	branchInfoValue = { smart: false, model: null };
+	await runTimers();
+	check("lista stigne a sesija ima istoriju: model NIJE diran", !pickedGemini(), JSON.stringify(selects));
 }
 
 // ── 3. postojeci razgovor → smart OFF ─────────────────────────────────────
@@ -488,6 +557,81 @@ console.log("\nREGRESIJA — restart ne sme da vrati Gemini u veliku sesiju");
 	check("submit: prompt je ipak poslat", submits.length === 1, JSON.stringify(submits));
 	check("submit: trajna 'off' oznaka",
 		window.localStorage.getItem("composer-extras-gemini-seek-off-" + id) === "1");
+}
+
+console.log("\n429 / istrosena kvota — fallback NE sme da zavisi od 😎 toggla");
+
+// ── 13. sesija sa ISKLJUCENIM smart-om, model ostao na Gemini-ju → 429 ───
+//      Ovo je prijavljeni bug (2026-10-08): „zasto smart nije uradio try
+//      again sa DeepSeek-om kad je doslo do exhausted quota". Sesija je
+//      ostala na Gemini-ju iz prethodnog dana, smart se pri mount-u odlučio
+//      kao OFF, i 429 nije imao ko da hendluje.
+{
+	const id = "session-quota-smart-off";
+	reset(id);
+	sessionRows = { [id]: { id, blank: false } }; // postojeci razgovor → smart OFF
+	branchInfoValue = { smart: false, model: null };
+	currentModel = { ...GEMINI }; // ...a model je ostao na Gemini-ju
+	setContext(id, 40000);
+	await mount(id);
+	check("smart OFF: model pre greske stoji na Gemini-ju", !pickedDeepSeek(), JSON.stringify(selects));
+
+	await mount(id); // drugi mount: 429 listener je već instaliran na Session
+	await emitAgentError(id, "transport error, ništa kvotno");
+	check("smart OFF + ne-429 greska: nema prebacivanja", !pickedDeepSeek(), JSON.stringify(selects));
+
+	await emitAgentError(id, quotaError());
+	check("smart OFF + 429: model je prebacen na DeepSeek", pickedDeepSeek(), JSON.stringify(selects));
+	check("smart OFF + 429: poslat je auto-'try again'", submits.length === 1, JSON.stringify(submits));
+}
+
+// ── 14. 429 dok je model već DeepSeek → ništa (nema petlje) ──────────────
+{
+	const id = "session-quota-on-deepseek";
+	reset(id);
+	sessionRows = { [id]: { id, blank: false } };
+	branchInfoValue = { smart: false, model: null };
+	currentModel = { ...DEEPSEEK };
+	setContext(id, 40000);
+	await mount(id);
+	await mount(id);
+	await emitAgentError(id, quotaError());
+	check("429 na DeepSeek-u: nema select-a", selects.length === 0, JSON.stringify(selects));
+	check("429 na DeepSeek-u: nema auto-'try again'", submits.length === 0, JSON.stringify(submits));
+}
+
+// ── 15. korisnik upravo kuca → model se prebaci, draft se NE gazi ────────
+{
+	const id = "session-quota-draft";
+	reset(id);
+	sessionRows = { [id]: { id, blank: false } };
+	branchInfoValue = { smart: false, model: null };
+	currentModel = { ...GEMINI };
+	setContext(id, 40000);
+	await mount(id);
+	await mount(id);
+	drafts[id] = "moj nedovrseni prompt";
+	await emitAgentError(id, quotaError());
+	check("429 + draft u toku: model je ipak prebacen", pickedDeepSeek(), JSON.stringify(selects));
+	check("429 + draft u toku: auto-'try again' NIJE poslat", submits.length === 0, JSON.stringify(submits));
+	check("429 + draft u toku: draft je sacuvan", drafts[id] === "moj nedovrseni prompt", String(drafts[id]));
+}
+
+// ── 16. granica: najvise 3 auto-retry-ja, pa stop (nema petlje zahteva) ──
+{
+	const id = "session-quota-cap";
+	reset(id);
+	sessionRows = { [id]: { id, blank: false } };
+	branchInfoValue = { smart: false, model: null };
+	currentModel = { ...GEMINI };
+	setContext(id, 40000);
+	await mount(id);
+	await mount(id);
+	for (let i = 0; i < 5; i += 1) {
+		currentModel = { ...GEMINI }; // kao da prebacivanje nije prošlo — testiramo granicu
+		await emitAgentError(id, quotaError(undefined, String(10 + i), "attempt " + i));
+	}
+	check("granica: tacno 3 auto-'try again' (ne 5)", submits.length === 3, String(submits.length));
 }
 
 console.log(`\n${failed === 0 ? "SVE OK" : "IMENA GRESAKA"}: ${passed} proslo, ${failed} palo\n`);

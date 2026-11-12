@@ -4,8 +4,9 @@
 #   bash ~/dsh/make-restore-archive.sh            # osveži folder (bez .zip — imamo git)
 #   DSH_RESTORE_DL=... bash ~/dsh/make-restore-archive.sh   # drugi Download
 #
-# Arhiva je od 2026-10-08 JEDAN folder BEZ datuma:
-#   /storage/emulated/0/Download/DSH-Restore
+# Arhiva je od 2026-10-08 JEDAN folder BEZ datuma, od 2026-11-12 preimenovan u
+# isto ime kao git repo:
+#   /storage/emulated/0/Download/dsh-android-setup
 # i istovremeno git repo (github.com/VladimirJecic/dsh-android-setup, master).
 # Osvežava se U MESTU, pa nema više kopiranja prethodne arhive, nema
 # prepisivanja datuma u putanjama i nema „novi datum = novi folder". Datum je
@@ -34,7 +35,7 @@
 set -uo pipefail
 
 DL="${DSH_RESTORE_DL:-/storage/emulated/0/Download}"
-NEW="$DL/DSH-Restore"
+NEW="$DL/dsh-android-setup"
 BASE="$HOME/dsh/restore"
 H="$HOME"
 

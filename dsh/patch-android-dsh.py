@@ -152,7 +152,7 @@ def scoped_roots():
 # `in-history` (Gemini) je pre toga ISPRAZNILA slot u SREDINI. Praznina u
 # sredini obara DeepSeek-ov prefix-kes: poklapanje padne sa ~103k na ~43k, pa
 # se placa ponovno citanje svega iza nje. Ispravka popunjava ispraznjen slot
-# umesto da dodaje novi node. Detalji: sekcija 3b u DSH-Restore uputstvu
+# umesto da dodaje novi node. Detalji: sekcija 3b u dsh-android-setup uputstvu
 CS_ORIGINAL = '''\t\tif (latest.text === rendered) return [];
 \t\treturn [{
 \t\t\tmessage: createSystemMessage(rendered, SOURCE),

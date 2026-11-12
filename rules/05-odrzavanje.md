@@ -80,21 +80,25 @@ Ako treba samo vratiti `~/dsh` skripte i zakrpe (bez promene verzije):
 `../dsh-composer-extras/client.js` radi i u `~/dsh` i u arhivi).
 
 ```bash
-node ~/dsh/tests/test-composer-extras-smart-default.mjs      # 31 provera — smart pravilo + restart regresija
+node ~/dsh/tests/test-composer-extras-smart-default.mjs      # 44 provere — smart pravilo + restart + 429 fallback
 node ~/dsh/tests/test-composer-extras-context-guard.mjs      # 73 provere — context guard (prag 50%), modal, pill, branch
 node ~/dsh/tests/test-preset-compaction.mjs                  # 16 provera — auto: false + prag 60%
 node ~/dsh/tests/test-chat-jump-arrows.mjs                   # 53 provere — ▲▼ kroz moje poruke + sklanjanje pod pickerom
-python3 ~/dsh/tests/test-gemini-catalog-update.py            # 22 provere — `!!js` u cordis.patch.yml + auto-ispravka kataloga
+python3 ~/dsh/tests/test-gemini-catalog-update.py            # 24 provere — `!!js`/nepoznati tagovi u cordis.patch.yml + auto-ispravka kataloga
 ```
 
 - `test-composer-extras-smart-default.mjs` — **obavezno zelen posle svake
   promene smart pravila.** Pokriva: prazna sesija → smart ON, lista još
-  `pending` → OFF, postojeći razgovor → OFF, `…-on-` oznaka → ON, `…-off-` klik →
-  OFF, server `branch-info.smart:true` → ON, i **restart regresiju**: neblank
-  sesija sa `…-on-` oznakom i **nepoznatim** kontekstom ne sme da prebaci model
-  na Gemini (a kad projekcija stigne sa >300k → OFF + „off" oznaka; sa <300k →
-  ON). Harness ima deterministički `setTimeout`, pa se čekanje na projekciju
-  (12 × 250 ms) pušta ručno — test ne spava 3 s.
+  `pending` → odložena odluka (i ON kad lista stigne pre isteka čekanja), a ako
+  lista javi da sesija **ima** istoriju → OFF; postojeći razgovor → OFF, `…-on-`
+  oznaka → ON, `…-off-` klik → OFF, server `branch-info.smart:true` → ON, i
+  **restart regresiju**: neblank sesija sa `…-on-` oznakom i **nepoznatim**
+  kontekstom ne sme da prebaci model na Gemini (a kad projekcija stigne sa >300k
+  → OFF + „off" oznaka; sa <300k → ON). Od 2026-10-08 pokriva i **429 fallback**:
+  radi i sa ISKLJUČENIM smart-om (model je ostao na Gemini-ju), ne reaguje na
+  ne-429 grešku ni kad je model već DeepSeek, ne gazi draft koji korisnik kuca, i
+  staje posle 3 auto-retry-ja. Harness ima deterministički `setTimeout`, pa se
+  čekanje na projekciju (12 × 250 ms) pušta ručno — test ne spava 3 s.
 - `test-preset-compaction.mjs` — čuva `auto: false` i prag 60% na sva tri
   preseta. **Ovo je test koji pada ako dsh update promeni preset** (tada pokreni
   `~/dsh/preset-compaction-sync.py` i ponovo ga pusti).
@@ -114,13 +118,15 @@ python3 ~/dsh/tests/test-gemini-catalog-update.py            # 22 provere — `!
   `role="dialog"`+`aria-modal` ili `role="menu"`, ništa se ne renderuje; kad se
   overlay zatvori, strelice se vraćaju sa istim badge-om; **skriven** meni
   (`hidden`) ne sakriva strelice.
-- `test-gemini-catalog-update.py` — 22 provere za
+- `test-gemini-catalog-update.py` — 24 provere za
   `~/dsh/gemini-catalog-update.py`. Čuva `!!js` regresiju: cordis dozvoljava JS
   izraze (`disabled: !!js process.platform === 'win32'`) i PyYAML ih rešava u
   `tag:yaml.org,2002:js`, pa je multi-konstruktor registrovan samo pod `"!"`
   propuštao taj tag → **ceo patch sloj se nije parsirao pri svakom startu** i
-  Gemini katalog se tiho nije osvežavao (popravljeno 2026-10-08). Test pokriva i
-  duplikat ključa, `diagnose()` slučajeve (DUPLICATE_ADAPTER, model koji fali) i
+  Gemini katalog se tiho nije osvežavao (popravljeno 2026-10-08). Isti fallback
+  je registrovan i za prefiks `tag:yaml.org,2002:` (standardni tipovi se hvataju
+  pre njega), pa ni neki **budući** `!!<tag>` ne može da obori start. Test pokriva
+  i duplikat ključa, `diagnose()` slučajeve (DUPLICATE_ADAPTER, model koji fali) i
   da se **tuđi** `cordis.patch.yml` nikad ne prepisuje.
 
 Harness ne pokreće browser: lažni React (`useEffect` se stvarno izvršava u smart

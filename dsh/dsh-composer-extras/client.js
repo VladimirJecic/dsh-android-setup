@@ -361,6 +361,27 @@ window.__ModuleLoader__.load({
 		];
 		var geminiSeekState = {};
 		var AGENT_ERROR_429_PATTERN = /RESOURCE_EXHAUSTED|"code"\s*:\s*429/;
+		/** Poslednja 429 greska na koju je ovaj tab reagovao, po sesiji. Ne zivi u
+		 *  `geminiSeekState` jer padne i kada je smart za sesiju ISKLJUCEN. */
+		var lastHandledQuotaError = {};
+		/** Koliko je auto-"try again" pokusaja ovaj tab napravio, po sesiji.
+		 *  Bez granice bi 429 -> prebaci -> posalji -> 429 (ako prebacivanje ne
+		 *  prodje) bila beskrajna petlja zahteva; 3 u 10 minuta je dovoljno za
+		 *  pravi kratki rate-limit, a ne moze da se vrti. */
+		var geminiAutoRetries = {};
+		var GEMINI_SEEK_AUTO_RETRY_MAX = 3;
+		var GEMINI_SEEK_AUTO_RETRY_WINDOW_MS = 10 * 60 * 1000;
+		function allowGeminiAutoRetry(sessionId) {
+			var now = Date.now();
+			var record = geminiAutoRetries[sessionId];
+			if (!record || (now - record.windowStart) > GEMINI_SEEK_AUTO_RETRY_WINDOW_MS) {
+				geminiAutoRetries[sessionId] = { count: 1, windowStart: now };
+				return true;
+			}
+			if (record.count >= GEMINI_SEEK_AUTO_RETRY_MAX) return false;
+			record.count += 1;
+			return true;
+		}
 		var GEMINI_SEEK_BLOCK_STORAGE_KEY = "composer-extras-gemini-seek-blocked-until";
 
 		/**
@@ -657,6 +678,29 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
+		 * Da li je host lista sesija STIGLA (`phase === "ready"`)?
+		 *
+		 * Odvojeno od `sessionAuthoritativelyBlank` jer se ta dva razloga za
+		 * `false` moraju razlikovati: „lista jos nije stigla" je NEPOZNATO (i
+		 * sme da se saceka), a „stigla je i kaze da sesija nije prazna" je
+		 * odluka. Bez ove razlike je mount na sporom bootu (restart + restore
+		 * sesije) tiho gasio smart za PRAZNU sesiju — pa je sesija ostajala na
+		 * Gemini-ju sa iskljucenim smart-om i 429 nije imao ko da hendluje
+		 * (prijavljeno 2026-10-08: „zasto smart nije uradio try again sa
+		 * DeepSeek-om kad je doslo do exhausted quota").
+		 */
+		function sessionListReady(ctx) {
+			try {
+				var sessions = ctx.sessions;
+				if (sessions === undefined || sessions.list === undefined) return false;
+				var snapshot = sessions.list.getSnapshot();
+				return !!(snapshot && snapshot.phase === "ready");
+			} catch (error) {
+				return false;
+			}
+		}
+
+		/**
 		 * Per-session oznaka za sesije koje je `branch-into-new-session` startovao
 		 * „smart" (server im je pre prvog prompta izabrao Gemini).
 		 *
@@ -719,6 +763,77 @@ window.__ModuleLoader__.load({
 		var GEMINI_SEEK_CONTEXT_RETRY_MS = 250;
 		/** Sesije koje već čekaju projekciju — da se čekanje ne zakaže dvaput. */
 		var geminiSeekContextPending = {};
+		/** Sesije koje već čekaju da host lista sesija stigne (`phase: "ready"`) —
+		 *  ista svrha, drugi razlog čekanja. */
+		var geminiSeekDecisionPending = {};
+
+		/**
+		 * Odluka „da li se smart sam pali u OVOJ sesiji", izdvojena iz mount
+		 * efekta da bi mogla da se PONOVI.
+		 *
+		 * Zašto ponavljanje: `blank` (jedini dokaz da je sesija novokreirana)
+		 * dolazi iz host liste. Dok lista nije stigla, `blank` je NEPOZNAT — a
+		 * ranije se čitao kao „nije prazna", pa je mount na sporom bootu trajno
+		 * (do reloda) gasio smart praznoj sesiji. Sada se u tom slučaju odluka
+		 * odlaže i ponavlja do ~3s, pa se tek onda (ako lista nikad ne stigne)
+		 * sedne na „off".
+		 */
+		function decideGeminiSeekOnMount(ctx, sessionId, notify, attempt) {
+			var settled = geminiSeekState[sessionId];
+			if (settled !== undefined) {
+				settled.notify = notify;
+				return;
+			}
+			var off = sessionSmartOff(sessionId);
+			var marked = sessionSmartMarked(sessionId);
+			if (!off && (geminiSeekDefaultEnabled(ctx, sessionId) || marked)) {
+				// `automatic: true` je nosivo: automatska aktivacija odbija da
+				// prebaci model dok veličina konteksta nije poznata (vidi
+				// `activateGeminiSeek`). Ako odluka već čeka projekciju, ne
+				// zakazuj je opet.
+				if (!geminiSeekContextPending[sessionId]) {
+					activateGeminiSeek(ctx, sessionId, notify, { automatic: true });
+				}
+				return;
+			}
+			// Eksplicitan korisnikov „off" je odluka — tu se ne čeka ništa.
+			if (!off && !marked && !sessionListReady(ctx) && (attempt || 0) < GEMINI_SEEK_CONTEXT_MAX_ATTEMPTS) {
+				if (!geminiSeekDecisionPending[sessionId]) {
+					geminiSeekDecisionPending[sessionId] = true;
+					setTimeout(function () {
+						geminiSeekDecisionPending[sessionId] = false;
+						var current = geminiSeekState[sessionId];
+						decideGeminiSeekOnMount(ctx, sessionId,
+							current && current.notify ? current.notify : notify, (attempt || 0) + 1);
+					}, GEMINI_SEEK_CONTEXT_RETRY_MS);
+				}
+				return;
+			}
+			geminiSeekState[sessionId] = { enabled: false, notify: notify };
+			// Prvi put bez oznake: pitaj server da li je sesija branchovana sa
+			// smart startom, pa je označi i upali. Eksplicitno ugašena sesija se
+			// NE pita — korisnikov klik pobeđuje serversku oznaku.
+			if (!off && !branchInfoChecked[sessionId]) {
+				branchInfoChecked[sessionId] = true;
+				fetch("/composer-extras/api/branch-info?sessionId=" + encodeURIComponent(sessionId))
+					.then(function (res) { return res.json().catch(function () { return null; }); })
+					.then(function (data) {
+						var value = data && data.ok ? data.value : null;
+						if (!value || !value.smart) return;
+						markSessionSmart(sessionId);
+						var current = geminiSeekState[sessionId];
+						if (!current || !current.enabled) {
+							// Server tvrdi da je sesija branchovana sa smart
+							// startom — to je automatska aktivacija, pa važi
+							// isto pravilo: bez poznate veličine konteksta se
+							// model NE prebacuje.
+							activateGeminiSeek(ctx, sessionId, notify, { automatic: true });
+							if (notify) notify();
+						}
+					})
+					.catch(function () { /* stari server bez rute — ostaje isključeno */ });
+			}
+		}
 
 		/**
 		 * Sigurnosna mreža za aktivaciju koja je prošla bez POZNATE veličine
@@ -1050,41 +1165,105 @@ window.__ModuleLoader__.load({
 				if (session && !session.__composerExtrasErrorWatched) {
 					session.__composerExtrasErrorWatched = true;
 					session.notifier.subscribe(function () {
-						var state = geminiSeekState[sessionId];
-						if (!state || !state.enabled) return;
-						var err = session.lastAgentError;
-						if (!err || typeof err !== "string") return;
-						if (!AGENT_ERROR_429_PATTERN.test(err)) return;
-						if (err === state.lastHandledAgentError) return; // already reacted to this exact error
-						var seg = GEMINI_SEEK_SCHEDULE[state.scheduleIndex];
-						if (seg.provider !== "google") return; // only jump early off the Gemini segment
-						var deepseekIndex = GEMINI_SEEK_SCHEDULE.findIndex(function (s) { return s.provider !== "google"; });
-						if (deepseekIndex === -1) return;
-						state.lastHandledAgentError = err;
-						// Zapamti KOJA je kvota pukla. Dnevna (RPD) se ne resava
-						// cekanjem od minut — blokira se do ponoci po Pacifiku,
-						// inace bi `retry-after` od 36s zavarao i vracali bismo se
-						// u isti zid ceo dan.
-						var quota = parseGeminiQuota(err);
-						var blockMs = geminiBlockMsFor(quota, err);
-						if (blockMs > 0) {
-							state.geminiBlockedUntil = Date.now() + blockMs;
-							state.geminiBlockKind = quota.kind;
-							persistGeminiBlock(state.geminiBlockedUntil, quota.kind);
+						// Ovo je tudji notifier (session store): izuzetak ovde bi
+						// mogao da prekine obavestavanje OSTALIH pretplatnika, pa
+						// se svaki izlaz iz naslovnog puta hvata ovde.
+						try {
+							var err = session.lastAgentError;
+							if (!err || typeof err !== "string") return;
+							if (!AGENT_ERROR_429_PATTERN.test(err)) return;
+							if (err === lastHandledQuotaError[sessionId]) return; // already reacted to this exact error
+							// NAMERNO bez `state.enabled` uslova. Do 2026-10-08 je ovde
+							// stajalo `if (!state || !state.enabled) return;`, pa je
+							// sesija koja je OSTALA na Gemini-ju a ciji smart nije bio
+							// ukljucen (auto-paljenje se odlucuje jednom, pri mount-u)
+							// ostajala zaglavljena: Google vrati 429, nista se ne
+							// prebaci, i korisnik rucno klikce "try again" u isti zid.
+							// Kvota je vezana za MODEL koji je pukao, ne za toggle.
+							var state = geminiSeekState[sessionId];
+							var directory = ctx.modelDirectories.directoryFor(sessionId);
+							var current = directory.store.getSnapshot().current;
+							if (!current || current.provider !== "google") return; // samo 429 sa Gemini rute
+							var deepseekIndex = GEMINI_SEEK_SCHEDULE.findIndex(function (s) { return s.provider !== "google"; });
+							if (deepseekIndex === -1) return;
+							var target = GEMINI_SEEK_SCHEDULE[deepseekIndex];
+							if (current.model === target.model) return; // vec smo na DeepSeek-u
+							if (!allowGeminiAutoRetry(sessionId)) {
+								reportDiag({
+									where: "gemini-429-retry-capped",
+									sessionId: String(sessionId),
+									model: current.provider + "/" + current.model,
+								});
+								return;
+							}
+							lastHandledQuotaError[sessionId] = err;
+							// Zapamti KOJA je kvota pukla. Dnevna (RPD) se ne resava
+							// cekanjem od minut — blokira se do ponoci po Pacifiku,
+							// inace bi `retry-after` od 36s zavarao i vracali bismo se
+							// u isti zid ceo dan.
+							var quota = parseGeminiQuota(err);
+							var blockMs = geminiBlockMsFor(quota, err);
+							if (blockMs > 0) {
+								persistGeminiBlock(Date.now() + blockMs, quota.kind);
+								if (state) {
+									state.geminiBlockedUntil = Date.now() + blockMs;
+									state.geminiBlockKind = quota.kind;
+								}
+							}
+							if (state) {
+								state.scheduleIndex = deepseekIndex;
+								state.remaining = target.count;
+								state.segmentStartedAt = Date.now();
+								state.lastAppliedModel = { provider: target.provider, model: target.model };
+								state.applyingSwitch = true;
+								if (state.notify) state.notify();
+							}
+							reportDiag({
+								where: "gemini-429-fallback",
+								sessionId: String(sessionId),
+								smart: !!(state && state.enabled),
+								from: current.provider + "/" + current.model,
+								to: target.provider + "/" + target.model,
+								quota: quota.kind,
+								blockMs: blockMs,
+							});
+							ensureModelSelected(ctx, sessionId, target).then(function () {
+								if (state) state.applyingSwitch = false;
+								// Auto-"try again" samo ako je prebacivanje STVARNO proslo:
+								// inace bi ponovljeni zahtev opet otisao na Gemini, opet
+								// pukao na 429, i napravio petlju zahteva.
+								var now = directory.store.getSnapshot().current;
+								if (!now || now.provider === "google") {
+									reportDiag({ where: "gemini-429-switch-noop", sessionId: String(sessionId) });
+									return;
+								}
+								// Ne gazeci ono sto korisnik upravo kuca: auto-"try again"
+								// prepisuje draft, pa se salje samo ako je draft prazan.
+								// (Model je svakako vec prebacen, pa korisnikov tekst ide
+								// na DeepSeek.)
+								var draft = readDraft(ctx, sessionId);
+								if (typeof draft === "string" && draft.trim() !== "") {
+									reportDiag({ where: "gemini-429-draft-kept", sessionId: String(sessionId) });
+									return;
+								}
+								sendQuickText(ctx, sessionId, "try again");
+							}).catch(function (error) {
+								if (state) state.applyingSwitch = false;
+								reportDiag({
+									where: "gemini-429-switch-failed",
+									sessionId: String(sessionId),
+									error: String(error && error.message ? error.message : error),
+								});
+								console.warn("[dsh-composer-extras] gemini-seek-smart 429-triggered model switch failed:", error);
+							});
+						} catch (error) {
+							reportDiag({
+								where: "gemini-429-listener-failed",
+								sessionId: String(sessionId),
+								error: String(error && error.message ? error.message : error),
+							});
+							console.warn("[dsh-composer-extras] gemini-seek-smart 429 listener failed:", error);
 						}
-						var target = GEMINI_SEEK_SCHEDULE[deepseekIndex];
-						state.scheduleIndex = deepseekIndex;
-						state.remaining = target.count;
-						state.segmentStartedAt = Date.now();
-						state.lastAppliedModel = { provider: target.provider, model: target.model };
-						state.applyingSwitch = true;
-						if (state.notify) state.notify();
-						ensureModelSelected(ctx, sessionId, target).catch(function (error) {
-							console.warn("[dsh-composer-extras] gemini-seek-smart 429-triggered model switch failed:", error);
-						}).finally(function () {
-							state.applyingSwitch = false;
-							sendQuickText(ctx, sessionId, "try again");
-						});
 					});
 				}
 			} catch (error) {
@@ -2680,54 +2859,10 @@ window.__ModuleLoader__.load({
 					if (sessionId === undefined) return;
 					ensureGeminiSeekHook(ctx, sessionId);
 					var notify = function () { setTick(function (n) { return n + 1; }); };
-					var state = geminiSeekState[sessionId];
-					if (!state) {
-						// Dva nezavisna razloga da se smart upali sam:
-						//  1) sesija je još PRAZNA (dugme „+") — tada je smart
-						//     podrazumevano stanje (vidi geminiSeekDefaultEnabled);
-						//  2) `branch-into-new-session` ruta ju je označila kao
-						//     smart start (per-session oznaka `…-on-<id>`).
-						// Eksplicitan 😎 „off" klik pobeđuje oba.
-						var off = sessionSmartOff(sessionId);
-						var marked = sessionSmartMarked(sessionId);
-						if (!off && (geminiSeekDefaultEnabled(ctx, sessionId) || marked)) {
-							// `automatic: true` je nosivo: automatska aktivacija
-							// odbija da prebaci model dok veličina konteksta nije
-							// poznata (vidi `activateGeminiSeek`). Ako odluka već
-							// čeka projekciju, ne zakazuj je opet.
-							if (!geminiSeekContextPending[sessionId]) {
-								activateGeminiSeek(ctx, sessionId, notify, { automatic: true });
-							}
-						} else {
-							geminiSeekState[sessionId] = { enabled: false, notify: notify };
-							// Prvi put bez oznake: pitaj server da li je sesija
-							// branchovana sa smart startom, pa je označi i upali.
-							// Eksplicitno ugašena sesija se NE pita — korisnikov
-							// klik pobeđuje serversku oznaku.
-							if (!sessionSmartOff(sessionId) && !branchInfoChecked[sessionId]) {
-								branchInfoChecked[sessionId] = true;
-								fetch("/composer-extras/api/branch-info?sessionId=" + encodeURIComponent(sessionId))
-									.then(function (res) { return res.json().catch(function () { return null; }); })
-									.then(function (data) {
-										var value = data && data.ok ? data.value : null;
-										if (!value || !value.smart) return;
-										markSessionSmart(sessionId);
-										var current = geminiSeekState[sessionId];
-										if (!current || !current.enabled) {
-											// Server tvrdi da je sesija branchovana sa smart
-											// startom — to je automatska aktivacija, pa važi
-											// isto pravilo: bez poznate veličine konteksta se
-											// model NE prebacuje.
-											activateGeminiSeek(ctx, sessionId, notify, { automatic: true });
-											setTick(function (n) { return n + 1; });
-										}
-									})
-									.catch(function () { /* stari server bez rute — ostaje isključeno */ });
-							}
-						}
-					} else {
-						state.notify = notify;
-					}
+					// Odluka je izdvojena u `decideGeminiSeekOnMount` jer ume da se
+					// PONOVI: dok host lista sesija ne stigne, `blank` je nepoznat
+					// (vidi tu funkciju) i odluka se ne sme sesti na „off".
+					decideGeminiSeekOnMount(ctx, sessionId, notify, 0);
 					// eslint-disable-next-line
 				}, [sessionId]);
 

@@ -74,6 +74,15 @@ check(
 local = m.parse("disabled: !js ctx.get('a')\n")
 check("lokalni `!js` takodje prolazi", local == {"disabled": "ctx.get('a')"}, repr(local))
 
+# Generalizacija 2026-10-08: isti problem vazi za BILO KOJI buduci `!!<tag>`
+# (npr. da cordis uvede `!!expr`). Standardni tagovi (str/int/bool/map/seq/null)
+# su u `yaml_constructors` i hvataju se PRE multi-konstruktora, pa fallback
+# prefiks `tag:yaml.org,2002:` ne moze da im naudi.
+future = m.parse("disabled: !!expr ctx.get('a')\n")
+check("buduci nepoznat `!!tag` ne obara parse", future == {"disabled": "ctx.get('a')"}, repr(future))
+std = m.parse("n: 5\nb: true\ns: tekst\nl: [1, 2]\n")
+check("standardni tipovi ostaju netaknuti", std == {"n": 5, "b": True, "s": "tekst", "l": [1, 2]}, repr(std))
+
 # Prava linija iz cordis.patch.yml koja je obarala start.
 real = m.parse("      - id: tool-bash\n        disabled: !!js process.platform === 'win32'\n")
 check("prava linija iz patch sloja prolazi", real[0]["id"] == "tool-bash", repr(real))

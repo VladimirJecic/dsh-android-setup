@@ -36,11 +36,11 @@ Server radi `lstat` (ne prati symlink), **neprazan folder odbija**, vraća rezul
 
 ## 4. Vraćanje plugina iz arhive
 
-Iz `DSH-Restore` (arhiva u `~/storage/shared/Download`, bez datuma od 2026-10-08):
+Iz `dsh-android-setup` (arhiva u `~/storage/shared/Download`, bez datuma od 2026-10-08; do 2026-11-12 se zvala `DSH-Restore`):
 
 ```bash
 # cela obnova (profil, skripte, plugini, skills) — pita za tajne
-bash /storage/emulated/0/Download/DSH-Restore/restore.sh
+bash /storage/emulated/0/Download/dsh-android-setup/restore.sh
 
 # samo zakrpe + ~/dsh skripte (sam nađe najnoviju arhivu)
 bash ~/dsh/restore-patches.sh --check   # pregled
@@ -53,7 +53,7 @@ i pravi symlink `~/.dsh/profiles/node_modules/dsh-composer-extras -> ~/dsh/dsh-c
 > **Kopija plugina u arhivi je osvežena 2026-10-06** (sadrži i SMART branch /
 > `prompt-session` rute). Ako plugin menjaš posle toga, arhivu osveži jednim
 > potezom — `bash ~/dsh/make-restore-archive.sh` (uzme žive fajlove i osveži
-> folder `DSH-Restore` u mestu; **zip se ne pravi** — deljenje ide kroz git).
+> folder `dsh-android-setup` u mestu; **zip se ne pravi** — deljenje ide kroz git).
 
 ## 5. Poznato / istorija
 

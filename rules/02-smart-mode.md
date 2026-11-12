@@ -18,6 +18,7 @@ Raspored (`GEMINI_SEEK_SCHEDULE` u `client.js`):
 | Sesija | Smart |
 |---|---|
 | **Prazna nova sesija** (dugme „+", `SessionSummary.blank === true`, lista `ready`) | **DA** — podrazumevano |
+| Prazna sesija dok host lista **još nije stigla** (`phase: "pending"`) | **ODLOŽENO** — čeka se do ~3 s pa se odlučuje (vidi ispod) |
 | Postojeći razgovor sa istorijom | **NE** |
 | Sesija koju je `branch-into-new-session` označila kao smart (`…-on-<id>`) | DA — ali samo ako je kontekst poznat i ≤300k |
 | Bilo koja sesija sa eksplicitnim 😎 „off" (`…-off-<id>`) | NE — klik pobeđuje sve |
@@ -27,6 +28,14 @@ Raspored (`GEMINI_SEEK_SCHEDULE` u `client.js`):
   je lista stvarno stigla** (`phase === "ready"`). dsh klijent za nepoznatu
   sesiju počinje kao „conservatively blank" (`session.d.ts`), pa bi `blank: true`
   iz liste koja još učitava vratio smart u razgovor sa istorijom.
+- **`phase: "pending"` nije „nije prazna" nego „nepoznato"** (fix 2026-10-08).
+  Odluka se tada **odlaže** (12 × 250 ms ≈ 3 s, `decideGeminiSeekOnMount` +
+  `geminiSeekDecisionPending`) i ponavlja kad lista stigne; tek ako lista nikad
+  ne stigne — OFF. Ranije se `pending` čitao kao „nije prazna", pa je mount na
+  sporom bootu (restart + restore sesije) **trajno** gasio smart praznoj sesiji:
+  sesija je ostala na Gemini-ju iz prethodnog dana **bez** aktivnog smart-a, i
+  prvi 429 nije imao ko da hendluje (žalba 2026-10-08: „zašto smart nije uradio
+  try again sa DeepSeek-om kad je došlo do exhausted quota").
 - **Zašto tako:** prva verzija fix-a ugasila je auto-paljenje svuda (žalba „sam
   se uključio Smart mode kada sam se prebacio na razgovor"), pa je i obična nova
   prazna sesija ostala bez smart-a — korisnik je to odbio. Sada je prazna sesija
@@ -65,6 +74,15 @@ Pravilo sada:
 - **429 reakcija:** `session.lastAgentError` protiv
   `/RESOURCE_EXHAUSTED|"code"\s*:\s*429/` — odmah skok na DeepSeek + auto
   `"try again"`, ne čeka se kraj budžeta.
+- **429 fallback NE zavisi od 😎 toggla** (fix 2026-10-08). Uslov je **model koji
+  je pukao** (`directory.store.current.provider === "google"`), ne `state.enabled`:
+  do tada je `if (!state || !state.enabled) return;` značio da sesija koja je
+  ostala na Gemini-ju sa isključenim smart-om klikće „try again" ručno u isti
+  zid. Uz to: auto-`"try again"` ide **samo ako je prebacivanje stvarno prošlo**
+  (inače bi petlja zahteva vrtela 429), **ne gazi draft** koji korisnik kuca, i
+  **cap je 3 auto-retry-ja u 10 minuta** po sesiji (`allowGeminiAutoRetry`).
+  Svaka odluka se beleži u `~/dsh/composer-diag.log` (`gemini-429-fallback`,
+  `-retry-capped`, `-switch-noop`, `-switch-failed`, `-draft-kept`).
 - **Ručni izbor modela gasi toggle** (`directory.store.subscribe`), ali
   `applyingSwitch` blokira reakciju na sopstveni switch — bez toga se toggle
   gasio na svaki auto-switch.
@@ -81,7 +99,7 @@ Pravilo sada:
 ## Kako se proverava
 
 ```bash
-node ~/dsh/tests/test-composer-extras-smart-default.mjs   # 31 provera, obavezno zelen posle svake izmene smart pravila
+node ~/dsh/tests/test-composer-extras-smart-default.mjs   # 44 provere, obavezno zelen posle svake izmene smart pravila
 ```
 
 Detalji testa: [`05-odrzavanje.md`](05-odrzavanje.md).

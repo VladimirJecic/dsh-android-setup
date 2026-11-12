@@ -8,7 +8,8 @@
 
 - **Živi izvor je `~/dsh`** (+ `~/.dsh`, `~/.local/bin/dsh-termux`, profil).
   Arhiva je **snapshot** tog stanja u **jednom folderu bez datuma**:
-  `/storage/emulated/0/Download/DSH-Restore`.
+  `/storage/emulated/0/Download/dsh-android-setup` — **ime je isto kao ime git
+  repoa** (do 2026-11-12 se folder zvao `DSH-Restore`), da se lako nađe.
 - Isti folder je i **git repo** → <https://github.com/VladimirJecic/dsh-android-setup.git>
   (branch `master`, nalog **VladimirJecic**; auth preko `gh`,
   `gh auth git-credential` je u `~/.gitconfig`, `git push` ne pita ništa).
@@ -67,7 +68,7 @@ Sadržaj je **100% izveden iz živog sistema**, pa je osvežavanje egzaktno:
 
 ```bash
 bash ~/dsh/make-restore-archive.sh          # 1. osveži iz živog sistema
-cd /storage/emulated/0/Download/DSH-Restore
+cd /storage/emulated/0/Download/dsh-android-setup
 git status --short                          # 2. pogledaj šta se promenilo
 git add -A && git commit -m "<kratko, srpski>" && git push origin master
 ```
@@ -77,7 +78,7 @@ git add -A && git commit -m "<kratko, srpski>" && git push origin master
   `git status` — nijedna tajna, nijedan log.
 - Ako `.git` iz nekog razloga ne postoji (nov telefon, obrisan folder):
   ```bash
-  cd /storage/emulated/0/Download/DSH-Restore
+  cd /storage/emulated/0/Download/dsh-android-setup
   git init && git branch -M master
   git remote add origin https://github.com/VladimirJecic/dsh-android-setup.git
   git fetch origin && git reset --mixed origin/master
@@ -85,7 +86,7 @@ git add -A && git commit -m "<kratko, srpski>" && git push origin master
   ```
   (`reset --mixed` da se istorija nastavi, a ne da nastane unrelated commit.)
 - Stariji datumski folderi (`DSH-Restore-20261007` i sl.) su istorijski; kad
-  zatrebaju, mogu se obrisati — jedini radni worktree je `DSH-Restore`.
+  zatrebaju, mogu se obrisati — jedini radni worktree je `dsh-android-setup`.
 
 ## Vraćanje (`restore.sh`)
 
@@ -95,5 +96,5 @@ git add -A && git commit -m "<kratko, srpski>" && git push origin master
   `AGENTS.md` i `skills/*`. Tajne se unose ručno (korak 9).
 - Idempotentan je: pravi `.bak-<timestamp>` samo za fajl koji se stvarno menja.
 - Za samo vraćanje `~/dsh` skripti i zakrpa (bez promene verzije):
-  `bash ~/dsh/restore-patches.sh` — traži `DSH-Restore/dsh`, a razume i stari
-  `DSH-Restore-<datum>`.
+  `bash ~/dsh/restore-patches.sh` — traži `dsh-android-setup/dsh`, a razume i
+  stara imena `DSH-Restore` i `DSH-Restore-<datum>`.
