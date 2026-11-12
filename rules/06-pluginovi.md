@@ -31,6 +31,32 @@
   strelicama (ispod): `shell.overlay` je iznad composera, pa se jedino tako zna
   da treba da se sklone. Context-guard kartica to ne mora — ona je pravi
   `role="dialog"` + `aria-modal="true"`.
+- **Overlay i floating površine idu kroz `modalPortal` u `document.body`**
+  (od 2026-11-13). Slot u koji se ubacujemo živi **u composeru**, a
+  `position: fixed` unutar pretka sa `transform`/`filter`/`contain` se vezuje za
+  **taj pretka**, ne za viewport (novi *containing block*). Tada `inset: 0`
+  postaje „composer", a `top` izmeren u viewport koordinatama pada duboko u
+  stranicu. Regresija posle dsh **0.2.2-rc.1**: bedž modela je iskočio preko
+  composera, a „Select" u file pickeru se zalepio za samo dno ekrana — odmah uz
+  sistemsku back/gesture zonu (teško se klikne). Oba su sada u portalu:
+  `modalPortal(node)` je identitet ako `react-dom` nije dostupan (nikad ne puca).
+- **Bedž modela se ne centrira.** X je uvek `right: 10` (viewport), meri se
+  samo Y (centar reda tabova). Kad je bio „odmah posle tabova", na telefonu je
+  ispadao na sredinu ekrana i smetao eksportu sesije i drugim popoverima
+  (zahtev 2026-11-13). Panel sa objašnjenjem visi sa **desne** ivice
+  (`right: 0; left: auto`), da ne iskoči van ekrana.
+- **File picker je poravnat uz GORNJU ivicu** (`alignItems: flex-start`,
+  `padding-top: 8vh`), ne centriran: centriran sheet na telefonu, kad je lista
+  dugačka, legne uz samo dno i „Select" padne na gesture zonu.
+- **Multi-select (`☑️` → `✅`) hrani „Select".** Označeni fajlovi se dodaju u
+  draft jednim pozivom (`onSelectMany`), dugme piše `Select (N)`; brisanje je i
+  dalje odvojeno (`🗑️` sa svojom potvrdom). Ranije je Select radio samo za
+  jedan označen red.
+- **Footer/dugmad u overlay-u ne smeju da legnu na ivicu ekrana:** spoljni
+  `fixed; inset: 0` sloj nosi `padding: 14px 0 calc(14px + env(safe-area-inset-bottom, 0px))`,
+  a sheet `maxHeight: min(70vh, calc(100dvh - 28px))` (`dvh`, ne `vh` — tastatura
+  ne menja `vh`). Provera posle svakog dsh update-a: vidi
+  [`05-odrzavanje.md`](05-odrzavanje.md) checklist.
 - Smart mode i context guard imaju svoja pravila:
   [`02-smart-mode.md`](02-smart-mode.md),
   [`03-kontekst-i-kompakcija.md`](03-kontekst-i-kompakcija.md).

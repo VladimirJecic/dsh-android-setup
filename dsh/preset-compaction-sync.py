@@ -14,7 +14,10 @@ ZASTO OVAKO
 `compaction-basic` u web profilu NE postoji kao host red: `dsh-web-app` ga
 iskljucuje (`- id: compaction-basic / disabled: true`) jer compaction zivi u
 realm-u agent preseta. Aktivne kopije su redovi unutar deklaracije preseta
-(`preset-standard`, `preset-ptc`, `preset-cordis`), pa se config menja tamo.
+(`preset-standard`, `preset-ptc`, `preset-cordis`, a od dsh 0.2.2 i
+`preset-minimal` — minimal je tek tada dobio `compaction-basic`), pa se config
+menja tamo. Skripta preskace preset koji NE montira compaction, pa dodavanje
+petog preseta u dsh ne zahteva izmenu ovde.
 
 Patch mehanizam (vidi skill `cordis-composition-reference`):
   * `insert: [rows]` dodaje redove;
@@ -57,7 +60,7 @@ BEGIN = "# >>> preset-compaction (auto-generisano; ne edituj rucno — pokreni p
 END = "# <<< preset-compaction <<<"
 
 DEFAULT_RATIO = 0.6
-DEFAULT_PRESETS = ("standard", "ptc", "cordis")
+DEFAULT_PRESETS = ("minimal", "standard", "ptc", "cordis")
 
 # Gde se trazi instalirani bundle; prva koja nadje presets/ pobedjuje.
 BUNDLE_CANDIDATES = (

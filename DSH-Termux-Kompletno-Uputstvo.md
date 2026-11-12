@@ -905,7 +905,17 @@ i napredak (`"gemini-seek-smart: Gemini Flash-Lite (1/2)"` ili
 
 Fiksni bedž pri vrhu ekrana (`position: fixed`, `pointerEvents: 'none'`) —
 uvek prikazuje trenutno aktivan model (`current.model`), sa `" 😎"` sufiksom
-kad je gemini-seek-smart uključen. Živi preko
+kad je gemini-seek-smart uključen. **Od 2026-11-13 (dsh 0.2.2) renderuje se
+kroz `modalPortal` u `document.body`**: slot mu je u composeru, a `fixed`
+unutar pretka sa `transform`/`filter` visi o tom pretku, pa je bedž ispadao
+preko composera umesto uz red tabova. Ako bedž posle update-a opet “šeta”,
+prvo proveri da li je portal na mestu, ne koordinate (`top`/`left`).
+
+Pozicija (od 2026-11-13): **X se ne meri** — uvek `right: 10` uz desnu ivicu
+viewporta; meri se samo Y (centar reda tabova, uz `data-conversation-tabs`, pa
+`data-conversation-header-corner`). Ranije je stajao odmah posle tabova, što je
+na telefonu sredina ekrana — smetao je eksportu sesije i popoverima koji se tu
+otvaraju. Panel sa objašnjenjem visi sa desne ivice (`right: 0`). Živi preko
 `useSyncExternalStore(directory.store.subscribe, directory.store.getSnapshot)`
 — isti subscribe-kontrakt koji `dsh-client-ui-model-selection`-ov sopstveni
 padajući meni koristi iznutra — pa se ažurira i na gemini-seek-smart-ov
@@ -1305,16 +1315,18 @@ dsh: novija verzija je dostupna; update je ISKLJUCIVO RUCNI -> ~/dsh/dsh-update.
 | offline registry | `timeout 12` — boot se ne odlaže |
 
 Trenutno stanje na uređaju (pročitano iz `package.json` globalne instalacije):
-**`0.2.0-rc.2`** (od 2026-10-06; pre toga `0.1.7-rc.2`). `npm-latest` se ne
-fiksira u dokumentu — to je mrežna vrednost koja se menja, a ispisuje je
-launcher sam.
+**`0.2.2-rc.1`** (od 2026-11-13; pre toga `0.2.0-rc.2`, a pre toga `0.1.7-rc.2`).
+`npm-latest` se ne fiksira u dokumentu — to je mrežna vrednost koja se menja, a
+ispisuje je launcher sam. `restore/restore.sh` pinuje **istu** verziju
+(`DSH_VERSION`), da restore ne vrati setup na verziju bez zakrpa iz
+[AŽURIRANJA — 2026-11-13](#ažuriranja--2026-11-13-020-rc2--022-rc1).
 
 ## C. `dsh-update.sh` — 10 faza
 
 ```bash
 ~/dsh/dsh-update.sh --check              # samo prijava (nista se ne skida)
 ~/dsh/dsh-update.sh                      # update na npm latest
-~/dsh/dsh-update.sh --version 0.2.0-rc.2 # update/pin na tacno tu verziju
+~/dsh/dsh-update.sh --version 0.2.2-rc.1 # update/pin na tacno tu verziju
 ~/dsh/dsh-update.sh --no-swap            # sve do validacije, bez diranja instalacije
 ~/dsh/dsh-update.sh --rollback           # vrati poslednji backup
 ~/dsh/dsh-update.sh --force              # nastavi i kad plugin opsezi ne dozvoljavaju
@@ -1503,6 +1515,72 @@ Detalji u sekciji **9b** i u odvojenom fajlu `UPUTSTVO-dodatak-dugmad.md` u
 korenu ovog arhiva. Posle izmene plugina treba **restart dsh-a** da server deo
 učita novo — `bash ~/.dsh/skills/restart-dsh/restart-dsh.sh` (jedina komanda za
 restart, vidi 9b); klijent (dugmad) se učitava na refresh stranice.
+
+---
+
+# AŽURIRANJA — 2026-11-13 (`0.2.0-rc.2` → `0.2.2-rc.1`)
+
+Update je prošao kroz `~/dsh/dsh-update.sh` (sandbox → validacija → atomska
+zamena). Živa instalacija je zamenjena **pre** restarta, pa je stari proces još
+kratko radio staru verziju — nova se aktivira tek u novom procesu
+([`rules/05-odrzavanje.md`](rules/05-odrzavanje.md)).
+
+## A. Blokada koju je trebalo popraviti pre update-a: `tool_use` zakrpa
+
+Prvi prolaz je pao u fazi 5:
+
+```
+[x] tool_use: dsh-llm: zakrpan; dsh-llm-deepseek: TELO assistant() se ne poklapa
+GRESKA: zakrpe nisu primenjene na sandbox — Ziva instalacija je NETAKNUTA.
+```
+
+Uzrok: u `0.2.2` je `dsh-llm-deepseek` promenio telo `assistant()` —
+`return message.content.map(...)` je postalo
+`return message.content.flatMap((block, index) => { … })` (i sam izbacuje
+prazan text, ali **ne** ređa blokove, pa `[tool_use, text("hi")]` i dalje puca).
+
+Popravka u `~/dsh/patch-android-dsh.py`:
+
+- `TU_ORDER_VARIANTS` — lista prihvaćenih originala (`map` i `flatMap`), isti
+  obrazac kao `CS_VARIANTS` za cache-slot;
+- `TU_ORDER_RETURN_RE` — regex fallback: bilo koji `return message.content.<x>(`
+  u telu `assistant()` se pretvara u `const blocks = …`, pa zakrpa ne pada samo
+  zato što je dsh preimenovao metodu izdanja;
+- poruka o neuspehu sada ispiše prvih 140 znakova tela, da se odmah vidi šta se
+  promenilo.
+
+## B. Šta je 0.2.2 promenio u ponašanju (i šta je popravljeno)
+
+- **`preset-minimal` je dobio `compaction-basic`.** Do 0.2.1 minimal nije imao
+  compaction, pa ga `preset-compaction-sync.py` nije ni pokrivao i test je
+  proveravao baš to. Sada su **četiri** preseta u sync-u
+  (`minimal,standard,ptc,cordis`), a `test-preset-compaction.mjs` (19 provera)
+  pada ako se pojavi **nepokriven** `preset-*`.
+- **`position: fixed` unutar composera više ne važi za viewport** — regresija
+  koja je oborila dve naše površine (prijava 2026-11-13):
+  - **bedž aktivnog modela** („deepseek-flash") iskočio je preko composera
+    umesto uz red tabova — `top` izmeren u viewport koordinatama bio je
+    interpretiran relativno na pretka koji pravi novi *containing block*;
+  - **„Select" u „Dodaj u kontekst"** pickeru zalepio se za samo dno ekrana,
+    odmah uz sistemsku back/gesture zonu i bio teško pogodljiv.
+  Popravka: oba idu kroz `modalPortal` u `document.body` (isti mehanizam koji
+  context-guard kartica koristi od 2026-10-08), spoljni sloj pickera nosi
+  `padding: 14px 0 calc(14px + env(safe-area-inset-bottom, 0px))`, a sheet
+  `maxHeight: min(70vh, calc(100dvh - 28px))`.
+- **Novi paketi u 0.2.2** (`dsh-experimental-liveshare`, `…-forge-bundle`,
+  `…-ralph-bundle`, `…-session-search`, `…-cot-translation-bundle`,
+  `dsh-experimental-plugin-market-bundle`, `dsh-client-ui-plugin-market`,
+  `dsh-client-ui-context-menu`, …) su samo **prisutni** u instalaciji; profil
+  `web` ih ne uključuje, pa se ništa od njih ne montira.
+
+## C. Provera posle restarta
+
+1. Bedž modela stoji uz red tabova (ne preko composera).
+2. „Dodaj u kontekst" → „Select" ima vazduha odozdo.
+3. Oba lokalna plugina rade (📎 i ▲▼).
+4. File picker visi uz gornju ivicu (ne uz dno), a u multi-select modu
+   `✅` + `Select (N)` ubaci sve označene u kontekst.
+5. `node ~/dsh/tests/test-preset-compaction.mjs` — 19/0.
 
 ---
 

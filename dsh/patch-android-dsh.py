@@ -615,6 +615,23 @@ TU_ORDER_SNIPPET = (
     '\treturn ordered.length === blocks.length && ordered.every((block, index) => block === blocks[index]) ? blocks : ordered;\n'
 )
 
+# Telo `assistant()` se menja izmedju izdanja: do 0.2.1 je bilo
+# `return message.content.map(...)`, a od 0.2.2 `return message.content.flatMap(...)`
+# (uz `text.length === 0 ? [] : …`, sto je isti cilj kao nase izbacivanje praznog
+# teksta — ali NE resava redosled: `[tool_use, text("hi")]` i dalje puca).
+# Zato se prihvata vise varijanti originala, kao i za cache-slot (`CS_VARIANTS`):
+# svaka je (original, zamena) i menja se samo `return` u `const blocks =`.
+TU_ORDER_VARIANTS = [
+    ("return message.content.map(",
+     "const blocks = message.content.map("),
+    ("return message.content.flatMap((block, index) => {",
+     "const blocks = message.content.flatMap((block, index) => {"),
+]
+# Poslednja linija odbrane za BUDUCA izdanja: bilo koji `return message.content.<x>(`
+# u telu `assistant()` se pretvara u `const blocks = …`, pa zakrpa ne pada samo
+# zato sto je dsh promenio ime metode (`map` -> `flatMap` -> ...).
+TU_ORDER_RETURN_RE = re.compile(r"\treturn message\.content\.(map|flatMap|concatMap|reduce)\(")
+
 # android-empty-text-after-tool-call-fix: isti kvar se ne sme ni upisati u
 # durabilnu istoriju. pi-ai rutе zatvaraju stream praznim text blokom
 # (Gemini: block-start text -> block-end text ""), a `BlockAssembler` ga je
@@ -661,17 +678,25 @@ def _patch_tooluse_adapter(path, check):
     if start < 0 or end < 0:
         return "NIJE NADJEN assistant() u dsh-llm-deepseek"
     seg = src[start:end]
-    if "return message.content.map(" not in seg:
-        return "TELO assistant() se ne poklapa (dsh se promenio?)"
+    hit = next(((o, p) for o, p in TU_ORDER_VARIANTS if o in seg), None)
+    if hit is None:
+        # Neuspelo poklapanje se resava regex-om nad ISTIM telom (vidi
+        # TU_ORDER_RETURN_RE) — dsh je dovoljno promenio samo ime metode.
+        m = TU_ORDER_RETURN_RE.search(seg)
+        if m is None:
+            head = " ".join(seg.split())[:140]
+            return f"TELO assistant() se ne poklapa (dsh se promenio?): {head}"
+        hit = (m.group(0), m.group(0).replace("return message.content.", "const blocks = message.content.", 1))
     if check:
         return "TREBA zakrpati"
     idx = seg.rfind("\n}")
     if idx < 0:
         return "GRESKA: kraj assistant() nije nadjen"
     new_seg = seg[: idx + 1] + "\n" + TU_ORDER_SNIPPET + seg[idx + 1 :]
-    new_seg = new_seg.replace("return message.content.map(", "const blocks = message.content.map(", 1)
+    new_seg = new_seg.replace(hit[0], hit[1], 1)
     path.write_text(src[:start] + new_seg + src[end:])
-    note(f"tool-use-order: {path}")
+    label = "regex" if hit[0].lstrip().startswith("return message.content.") else hit[0].strip()[:28]
+    note(f"tool-use-order: {path} ({label})")
     return "zakrpan"
 
 

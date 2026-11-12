@@ -50,7 +50,7 @@ say "arhiva: $SRC"
 say
 
 say "0. provera preduslova"
-DSH_VERSION="0.2.0-rc.2"
+DSH_VERSION="0.2.2-rc.1"
 KOFFI_VERSION="3.3.2"
 
 # Instaliraj dsh ako ga nema — TESTIRANI 0.2.x protokol.

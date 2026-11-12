@@ -67,12 +67,20 @@ Ako treba samo vratiti `~/dsh` skripte i zakrpe (bez promene verzije):
    podesen (2 gemini modela, deepseek na native ruti)`.
 2. `python3 ~/dsh/preset-compaction-sync.py` — prepiše `auto: false` +
    `thresholdRatio: 0.6` u deklaracije preseta
-   ([`03-kontekst-i-kompakcija.md`](03-kontekst-i-kompakcija.md)).
+   ([`03-kontekst-i-kompakcija.md`](03-kontekst-i-kompakcija.md)). **Od 0.2.2
+   preseta su četiri** (`minimal` je dobio compaction) — skripta ispiše
+   `preseti=minimal,standard,ptc,cordis`.
 3. `node ~/dsh/compat-scan.mjs <verzija> ~/.dsh/profiles` — `KRSI`/`NEPOZNATO`
    na pluginovima znače da plugin treba ažurirati ili `--force`.
 4. `python3 ~/dsh/patch-android-dsh.py` — zakrpe (launcher ih ionako primenjuje).
 5. Svi testovi (tabela ispod) — moraju biti zeleni.
 6. `restart-dsh`, pa **hard refresh** i provera da su oba lokalna plugina tu.
+7. **Provera floating/overlay površina posle restarta** (dsh 0.2.2 regresija,
+   2026-11-13): bedž modela mora da stoji **uz red tabova** (ne preko
+   composera), a u „Dodaj u kontekst" pickeru **„Select" ne sme da legne na
+   samo dno ekrana** (gesture/back zona) — sheet mora da ima vazduha odozdo.
+   Oba se popravljaju portalom u `document.body`
+   ([`06-pluginovi.md`](06-pluginovi.md)).
 
 ## Testovi (dokazuju pravila, ne samo tvrde)
 
@@ -82,7 +90,7 @@ Ako treba samo vratiti `~/dsh` skripte i zakrpe (bez promene verzije):
 ```bash
 node ~/dsh/tests/test-composer-extras-smart-default.mjs      # 44 provere — smart pravilo + restart + 429 fallback
 node ~/dsh/tests/test-composer-extras-context-guard.mjs      # 73 provere — context guard (prag 50%), modal, pill, branch
-node ~/dsh/tests/test-preset-compaction.mjs                  # 16 provera — auto: false + prag 60%
+node ~/dsh/tests/test-preset-compaction.mjs                  # 19 provera — auto: false + prag 60% na SVA ČETIRI preseta
 node ~/dsh/tests/test-chat-jump-arrows.mjs                   # 53 provere — ▲▼ kroz moje poruke + sklanjanje pod pickerom
 python3 ~/dsh/tests/test-gemini-catalog-update.py            # 24 provere — `!!js`/nepoznati tagovi u cordis.patch.yml + auto-ispravka kataloga
 ```
@@ -99,9 +107,11 @@ python3 ~/dsh/tests/test-gemini-catalog-update.py            # 24 provere — `!
   ne-429 grešku ni kad je model već DeepSeek, ne gazi draft koji korisnik kuca, i
   staje posle 3 auto-retry-ja. Harness ima deterministički `setTimeout`, pa se
   čekanje na projekciju (12 × 250 ms) pušta ručno — test ne spava 3 s.
-- `test-preset-compaction.mjs` — čuva `auto: false` i prag 60% na sva tri
-  preseta. **Ovo je test koji pada ako dsh update promeni preset** (tada pokreni
-  `~/dsh/preset-compaction-sync.py` i ponovo ga pusti).
+- `test-preset-compaction.mjs` — čuva `auto: false` i prag 60% na sva četiri
+  preseta (`minimal`, `standard`, `ptc`, `cordis`; `minimal` je dodat u 0.2.2) i
+  **pada ako se pojavi preset koji nije pokriven** — tada ga dodaj u
+  `DEFAULT_PRESETS`. **Ovo je test koji pada ako dsh update promeni preset**
+  (tada pokreni `~/dsh/preset-compaction-sync.py` i ponovo ga pusti).
 - `context-guard` harness je **ceo zelen** od 2026-10-08 (**73/0**). Ranija 3
   crvena su bila stvarna neusklađenost, ne artefakt: dva su tražila prag od 500k
   dok je kod imao 40% prozora (sad 50% — poklapa se), a treće je testiralo staru

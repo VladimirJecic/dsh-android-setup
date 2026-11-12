@@ -9,7 +9,7 @@
 >
 > Ako se dokument i kod razilaze, **kod je istina** — ispravi fajl u `rules/`.
 
-Stanje na dan pisanja: dsh **0.2.0-rc.2**, port **3081**, profil **web**,
+Stanje na dan pisanja: dsh **0.2.2-rc.1** (13.11.2026.), port **3081**, profil **web**,
 lokalni pluginovi **`dsh-composer-extras`** i **`dsh-chat-jump-arrows`**.
 
 ## Mapa: stara sekcija → novi fajl

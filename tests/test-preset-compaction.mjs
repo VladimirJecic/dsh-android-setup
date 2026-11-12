@@ -92,7 +92,10 @@ console.log("\n1) host red je isključen (zamka koju ne treba ponoviti)");
 }
 
 console.log("\n2) prag 60% stoji u deklaracijama preseta");
-for (const preset of ["preset-standard", "preset-ptc", "preset-cordis"]) {
+// `preset-minimal` je u listu od dsh 0.2.2: minimal je tek tada dobio
+// `compaction-basic`, pa i on mora da nosi auto:false + 0.6 (inače minimal
+// tiho kompaktuje sâm, što je upravo ono što ovaj setup zabranjuje).
+for (const preset of ["preset-minimal", "preset-standard", "preset-ptc", "preset-cordis"]) {
 	const presetBlock = rowBlock(preset, 0);
 	check(`${preset}: deklaracija postoji`, presetBlock !== null);
 	// `compaction-basic` je unutar preseta uvučen dublje; traži red po sadržaju.
@@ -111,9 +114,18 @@ for (const preset of ["preset-standard", "preset-ptc", "preset-cordis"]) {
 		innerBlock === null ? "nema bloka" : innerBlock.join(" | "));
 }
 {
-	const minimal = rowBlock("preset-minimal", 0);
-	check("preset-minimal ne montira compaction (nema šta da se menja)",
-		minimal !== null && !minimal.some((line) => line.trim() === "- id: compaction-basic"));
+	// Bilo koji preset koji dsh-web-app montira a nije u gornjoj listi znači
+	// da je dsh dodao peti preset: tada ga dodaj u DEFAULT_PRESETS
+	// (preset-compaction-sync.py) i ovde, inače ostane bez auto:false.
+	const known = new Set(["preset-minimal", "preset-standard", "preset-ptc", "preset-cordis"]);
+	const declared = [];
+	for (const line of lines) {
+		const m = line.match(/^- id: (preset-[a-z0-9-]+)$/);
+		if (m !== null) declared.push(m[1]);
+	}
+	const unknown = declared.filter((id) => !known.has(id));
+	check(`svi presetovi su pokriveni (${declared.length}: ${declared.join(", ")})`, unknown.length === 0,
+		unknown.length === 0 ? "" : `nepokriveni: ${unknown.join(", ")} — dodaj ih u preset-compaction-sync.py`);
 }
 
 console.log("\n3) efektivni prag ispada tačno 60% (ne samo u configu)");

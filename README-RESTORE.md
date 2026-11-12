@@ -9,7 +9,7 @@
 > **`PRAVILA-DSH.md`** (danas podeljen u **`rules/`**) — pravila celog setup-a, i
 > arhiva je prvi put objavljena na GitHub
 > (**https://github.com/VladimirJecic/dsh-android-setup.git**). Prethodna
-> osnova (dsh **0.2.0-rc.2**, `dsh-update.sh` sa **10 faza**, odloženi restart
+> osnova (dsh **0.2.2-rc.1**, `dsh-update.sh` sa **10 faza**, odloženi restart
 > sa auto-rollback-om) i dalje važi.
 >
 > **Osveženo 2026-10-08:** novi plugin **`dsh-chat-jump-arrows`** (▲▼ kroz moje
@@ -59,7 +59,7 @@ Ručna provera: `python3 ~/dsh/patch-android-dsh.py --check`
 # 1. sistemski paketi (dsh se instalira sam u koraku 2 — vidi koffi zamku)
 pkg install nodejs python ripgrep -y
 
-# 2. vrati setup iz arhive (restore.sh sam instalira dsh 0.2.0-rc.2 ako ga nema)
+# 2. vrati setup iz arhive (restore.sh sam instalira dsh 0.2.2-rc.1 ako ga nema)
 bash ~/storage/shared/Download/dsh-android-setup/restore.sh --dry-run   # pogledaj
 bash ~/storage/shared/Download/dsh-android-setup/restore.sh             # primeni
 

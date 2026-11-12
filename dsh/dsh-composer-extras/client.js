@@ -1699,6 +1699,9 @@ window.__ModuleLoader__.load({
 		function FilePickerModal(props) {
 			var sessionId = props.sessionId;
 			var onSelect = props.onSelect;
+			// Select u multi-select modu dodaje SVE označene (2026-11-13, zahtev:
+			// „označim ✅ pa Select ubaci u kontekst"); brisanje i dalje ide preko 🗑️.
+			var onSelectMany = props.onSelectMany;
 			var onClose = props.onClose;
 
 			var pathState = useState("");
@@ -2058,7 +2061,12 @@ window.__ModuleLoader__.load({
 				body = createElement("div", { style: { maxHeight: 320, overflowY: "auto" } }, rows());
 			}
 
-			return createElement("div", {
+			// Šta „Select" dodaje: u multi-select modu sve ✅ označene, inače
+			// jedan red. `marked` van select moda uvek je prazan, ali se ne
+			// oslanjamo na to — mod se proverava eksplicitno.
+			var chosen = selectMode ? marked.slice() : (selected !== null ? [selected] : []);
+
+			var surface = createElement("div", {
 				// Ugovor sa `dsh-chat-jump-arrows`: svaka moja površina koja
 				// preuzme ceo ekran mora da se označi, jer `shell.overlay`
 				// (sloj strelica) stoji IZNAD composera, pa ga `zIndex: 10000`
@@ -2068,13 +2076,26 @@ window.__ModuleLoader__.load({
 				"data-dsh-overlay-surface": "file-picker",
 				style: {
 					position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
-					display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000,
+					// Gore, ne na dnu: centriran sheet na telefonu završi uz samu
+					// donju ivicu kad je sadržaj visok, pa „Select" padne na
+					// sistemsku back/gesture zonu (prijava 2026-11-13). Gornja
+					// ivica + `dvh` je predvidivo u oba slučaja (malo/visoko).
+					display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 10000,
+					// Gornja/donja ivica se nikad ne lepe za ekran: `Select` je
+					// ranije sedeo tačno uz sistemsku back/gesture zonu i bio
+					// teško pogodljiv (prijava 2026-11-13). `env(safe-area-inset-bottom)`
+					// pokriva gesture bar kad ga browser prijavi.
+					padding: "8vh 0 calc(14px + env(safe-area-inset-bottom, 0px))",
+					boxSizing: "border-box",
 				},
 				onClick: onClose,
 			}, createElement("div", {
 				style: {
 					background: "Canvas", color: "CanvasText", borderRadius: 10,
-					padding: 14, width: "min(420px, 90vw)", maxHeight: "70vh",
+					padding: 14, width: "min(420px, 90vw)",
+					// `dvh` umesto `vh`: kad se otvori tastatura, `vh` ostane na
+					// punoj visini pa footer ispadne ispod vidljivog dela.
+					maxHeight: "min(74vh, calc(100dvh - 8vh - 28px))",
 					boxShadow: "0 8px 30px rgba(0,0,0,0.3)", display: "flex", flexDirection: "column", gap: 8,
 				},
 				onClick: function (e) { e.stopPropagation(); },
@@ -2188,13 +2209,22 @@ window.__ModuleLoader__.load({
 						}, "Cancel"),
 						createElement("button", {
 							type: "button",
-							disabled: selected === null,
-							onClick: function () { if (selected !== null) onSelect(selected); },
-							style: selectButtonStyle(selected !== null),
-						}, "Select")
+							disabled: chosen.length === 0,
+							onClick: function () {
+								if (chosen.length === 0) return;
+								if (chosen.length === 1) onSelect(chosen[0]);
+								else onSelectMany(chosen.slice());
+							},
+							style: selectButtonStyle(chosen.length > 0),
+						}, chosen.length > 1 ? ("Select (" + chosen.length + ")") : "Select")
 					)
 				)
 			));
+			// Portal u `document.body` — bez njega `position: fixed; inset: 0`
+			// visi o composeru (transform/filter na pretku pravi novi
+			// containing block), pa se sheet poravna uz SAMO dno ekrana i
+			// „Select" padne na sistemsku back/gesture zonu. Vidi modalPortal().
+			return modalPortal(surface);
 		}
 
 		function apply(ctx) {
@@ -2213,6 +2243,17 @@ window.__ModuleLoader__.load({
 					setPickerOpen(false);
 					if (sessionId === undefined) return;
 					appendToDraft(ctx, sessionId, "@" + relPath);
+				}
+
+				// Multi-select (✅) + Select: svi označeni idu u draft u JEDNOM
+				// pozivu, pa se draft menja jednom (appendToDraft čita trenutno
+				// stanje, pa bi N poziva bilo N setDraft-ova za isti rezultat).
+				function handleSelectMany(relPaths) {
+					setPickerOpen(false);
+					if (sessionId === undefined || relPaths.length === 0) return;
+					appendToDraft(ctx, sessionId, relPaths.map(function (relPath) {
+						return "@" + relPath;
+					}).join(" "));
 				}
 
 				var button = createElement(
@@ -2252,6 +2293,7 @@ window.__ModuleLoader__.load({
 				return createElement(react.Fragment, null, button, createElement(FilePickerModal, {
 					sessionId: sessionId,
 					onSelect: handleSelect,
+					onSelectMany: handleSelectMany,
 					onClose: function () { setPickerOpen(false); },
 				}));
 			}
@@ -3056,6 +3098,14 @@ window.__ModuleLoader__.load({
 			 * own `directory.select()` call or the user picking one by hand in the
 			 * normal model dropdown. `pointerEvents: 'none'`: a passive readout,
 			 * never intercepts a tap meant for whatever is under it.
+			 *
+			 * 2026-11-13 (dsh 0.2.2-rc.1): bedž se renderuje kroz `modalPortal` u
+			 * `document.body`. Slot u koji se ubacuje živi u composeru, a
+			 * `position: fixed` unutar pretka sa `transform`/`filter`/`contain` se
+			 * vezuje za TAJ pretka, ne za viewport — zato je `top` izmeren od tab
+			 * reda (viewport koordinate) pao duboko preko composera. Portal vraća
+			 * `fixed` na viewport; ista zamka kao kod ContextGuard modala (vidi
+			 * `modalPortal`) i file pickera.
 			 */
 			function ModelStatusBadge(props) {
 				var session = props.session;
@@ -3122,15 +3172,16 @@ window.__ModuleLoader__.load({
 				// viewport (`top: 8, left: 50%`), which put it straight over the
 				// session header + the Chat/Trajectory tab row — the same strip
 				// dsh uses for its own transient notices, so it covered them.
-				// The tab row belongs to dsh-client-ui-conversation and exposes
-				// no slot, but it DOES carry `data-conversation-tabs`, so the
-				// chip measures that row and parks itself right after the last
-				// tab (next to "Trajectory"). `position: fixed` is kept because
-				// the slot the chip is injected into lives down in the composer;
-				// only the coordinates change. When the row is absent (a single
-				// registered view, or blank Hero chrome) it falls back to the
-				// header corner, and only if that is absent too does the old
-				// top-center spot remain.
+				// Then it parked right after the last tab; on a phone that is
+				// still the MIDDLE of the screen, and it collided with the
+				// session-export / other popovers that open there (2026-11-13:
+				// „poravnaj uz desnu stranu"). Now: vertical centre of the tab
+				// row, **right edge of the viewport**. Only the Y coordinate is
+				// measured (from `[data-conversation-tabs]`, else the header
+				// corner); X is always `right: 10`, so no measurement can put it
+				// in the middle again. `position: fixed` is kept because the
+				// slot the chip is injected into lives down in the composer;
+				// `modalPortal` makes that `fixed` refer to the viewport.
 				var anchorState = useState(null);
 				var anchor = anchorState[0];
 				var setAnchor = anchorState[1];
@@ -3146,7 +3197,7 @@ window.__ModuleLoader__.load({
 						var prev = anchorRef.current;
 						var changed = (prev === null) !== (next === null)
 							|| (prev !== null && next !== null
-								&& (prev.top !== next.top || prev.left !== next.left || prev.fallback !== next.fallback));
+								&& (prev.top !== next.top || prev.right !== next.right || prev.fallback !== next.fallback));
 						anchorRef.current = next;
 						if (changed) setAnchor(next);
 					}
@@ -3157,12 +3208,12 @@ window.__ModuleLoader__.load({
 						if (!el) { commit(null); setMeasured(true); return; }
 						var box = el.getBoundingClientRect();
 						if (box.width === 0 && box.height === 0) { commit(null); setMeasured(true); return; }
-						var own = wrapperRef.current ? wrapperRef.current.offsetWidth : 0;
-						var maxLeft = Math.max(8, window.innerWidth - own - 10);
-						var left = tabs ? box.right + 8 : box.right - own - 4;
+						// X je UVEK desna ivica viewporta — nikakvo merenje ne
+						// sme da vrati bedž u sredinu (2026-11-13: smetao je
+						// eksportu sesije i drugim popoverima na sredini).
 						commit({
 							top: Math.round(box.top + box.height / 2),
-							left: Math.round(Math.min(Math.max(8, left), maxLeft)),
+							right: 10,
 							fallback: tabs ? false : true,
 						});
 						setMeasured(true);
@@ -3270,10 +3321,13 @@ window.__ModuleLoader__.load({
 					pointerEvents: "auto",
 					zIndex: 10000,
 				};
-				if (anchor && !anchor.fallback) {
-					panelStyle.left = 0;
+				if (anchor) {
+					// Bedž je uz DESNU ivicu, pa i panel visi sa desne ivice —
+					// inače bi iskočio van ekrana na desno.
+					panelStyle.left = "auto";
+					panelStyle.right = 0;
 					panelStyle.transform = "none";
-					panelStyle.width = "min(300px, calc(100vw - " + (anchor.left + 12) + "px))";
+					panelStyle.width = "min(300px, calc(100vw - 24px))";
 				}
 
 				var peakPanel = !showPeak || !open ? null : createElement("div", {
@@ -3309,25 +3363,25 @@ window.__ModuleLoader__.load({
 				};
 				if (anchor) {
 					wrapperStyle.top = anchor.top;
-					wrapperStyle.left = anchor.left;
+					wrapperStyle.right = anchor.right;
 					wrapperStyle.transform = "translateY(-50%)";
 				} else {
+					// Nijedan anchor nije nađen: ipak gore-desno, nikad sredina.
 					wrapperStyle.top = 8;
-					wrapperStyle.left = "50%";
-					wrapperStyle.transform = "translateX(-50%)";
+					wrapperStyle.right = 10;
 				}
 				// First frame only: the chip must not flash at the old top-center
 				// spot before the tab row has been measured.
 				if (!measured) wrapperStyle.visibility = "hidden";
 
-				return createElement("div", {
+				return modalPortal(createElement("div", {
 					ref: wrapperRef,
 					style: wrapperStyle,
 				}, [
 					createElement("span", { key: "model" }, current.model + seekSuffix),
 					peakIcon,
 					peakPanel,
-				]);
+				]));
 			}
 
 			ctx.slots.inject("conversation.input.left", function () {

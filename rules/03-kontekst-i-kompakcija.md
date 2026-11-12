@@ -127,7 +127,11 @@ ručni ima `sourceCommandId: cmd-…` (tabela ispod).
 `compaction-basic` **ne postoji kao aktivan host red** — `dsh-web-app` ga
 isključuje (`disabled: true`) jer compaction živi u realm-u agent preseta.
 Aktivne kopije su u deklaracijama `preset-standard`, `preset-ptc`,
-`preset-cordis`.
+`preset-cordis`, a **od dsh 0.2.2 i `preset-minimal`** (minimal je tek tada
+dobio `compaction-basic`; do tada ga nije bilo i test je proveravao upravo to).
+Spisak je u `DEFAULT_PRESETS` (`preset-compaction-sync.py`); skripta preskoči
+preset koji ne montira compaction, a `test-preset-compaction.mjs` padne ako se u
+kompoziciji pojavi **nepokriven** `preset-*` — to je signal da se i on doda.
 
 - Patch sa `id` menja red, ali **`config` se zamenjuje u celosti** — nikad se ne
   spaja dubinski. Zato override preseta mora da ponovi ceo `config.plugins`.

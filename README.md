@@ -59,7 +59,7 @@ bash restore.sh              # primeni
 
 ## Stanje setup-a
 
-- dsh **0.2.0-rc.2**, port **3081**, profil **web**
+- dsh **0.2.2-rc.1**, port **3081**, profil **web**
 - model: `deepseek-official/deepseek-flash` (`reasoningEffort: high`)
 - Gemini (`gemini-flash-lite-latest`) preko `llm-pi-ai` — nosi 😎 smart rotaciju
 - pluginovi (oba lokalna, `link:`): `dsh-composer-extras`, `dsh-chat-jump-arrows`

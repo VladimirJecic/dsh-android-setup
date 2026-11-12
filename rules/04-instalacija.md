@@ -4,11 +4,11 @@
 > postupak za čoveka je u `~/dsh/DSH-Termux-Kompletno-Uputstvo.md`; ovde su
 > **pravila** koja se ne smeju pogaziti.
 
-## Šta je instalirano (stanje 2026-10-08)
+## Šta je instalirano (stanje 2026-11-13)
 
 | Komponenta | Verzija |
 |---|---|
-| `@deepseek-ai/dsh` | **0.2.0-rc.2** (globalno, `npm -g`) |
+| `@deepseek-ai/dsh` | **0.2.2-rc.1** (globalno, `npm -g`; od 13.11.2026.) |
 | Node.js | v26.4.0 |
 | Python | 3.14.6 |
 | profil | **web**, port **3081** |
