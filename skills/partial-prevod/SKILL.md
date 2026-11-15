@@ -22,7 +22,9 @@ S=~/.dsh/skills/partial-prevod
 cd "<folder epizode>"
 
 # 0. SAMO ako je ulaz video sa ugrađenim titlom (MKV):
-python3 $S/izvuci_titl.py "<video>.mkv"        # -> <video>.deDE.srt
+python3 $S/izvuci_titl.py --izlaz . "<video>.mkv"   # -> ./<video>.deDE.srt
+#    `--izlaz .` je OBAVEZAN kad je video u roditeljskom folderu: bez njega
+#    titl ode pored videa, a korak 1 padne na „nema titla" (exit 1).
 
 # 1. dijagnoza: nađe SVE nepoznate reči i upiše ih kao prazna polja
 python3 $S/dijagnoza.py "<naziv>.deDE.srt"     # -> lexikon_dodaci.json + transkript.md
@@ -61,6 +63,17 @@ U epizodi 1 je render startovan pre pregleda, pa je pokvaren unos
 (`das Grimoire = knjiga čini`) otkriven u toku rendera — render je ubijen na 1%
 i ceo posao je ponovljen.
 
+### Dve greške koje se ponavljaju u svakoj epizodi (exit 1)
+
+1. **`FileNotFoundError` / „nema titla” u koraku 1** — titl je izvučen **pored
+   videa**, a ne u folder epizode (tipično kad .mkv stoji u roditeljskom folderu
+   sezone). Rešenje: `izvuci_titl.py --izlaz . "<video>.mkv"`, ili posle
+   izvlačenja `mv "<ispisani put>" .`. Dijagnoza sada sama ispiše najbliže
+   `.srt` fajlove i tačan `mv` — ne pogađaj ime iznova.
+2. **`KeyError: 'STOP'`** kad skripta piše `d["STOP"].append(...)` — stariji
+   skelet nije imao `STOP`/`NIJE_KOGNAT`. Novi skelet ih uvek upisuje; ako
+   naiđeš na stari, koristi `d.setdefault("STOP", [])`.
+
 Ne patch-uj `generate_partial_srt.py` da bi dodao reč — rečnik je samo u
 `lexikon.json` (trajni) i `lexikon_dodaci.json` (epizoda).
 
@@ -78,8 +91,13 @@ i isti idiom u više scena — koji mora svuda imati isti prevod.
 ```json
 {"LEX": {"mut": "", "aufschlagen": "", "carlo": ""},
  "_kontekst": {"mut": "Mut | «…» | ⏵ Der Mut verlässt mich. | ⏴ «…»", "...": "..."},
- "SKIP": {}, "NAMES": []}
+ "SKIP": {}, "STOP": [], "NAMES": [], "NIJE_KOGNAT": []}
 ```
+
+Skelet **uvek** sadrži `SKIP` (rečnik), `STOP`, `NAMES` i `NIJE_KOGNAT`
+(liste) — dijagnoza ih upiše i kad su prazne. Ako ipak pišeš svoju skriptu
+za popunjavanje, koristi `d.setdefault("STOP", [])` umesto `d["STOP"]`:
+`d["STOP"]` na starijem skeletu pada na `KeyError: 'STOP'` (exit 1).
 
 Za **svaki** ključ uradi tačno jedno:
 
@@ -158,10 +176,23 @@ glagol prikazan kao imenica, pogrešno spojen odvojivi glagol, propuštena reč.
    > **Nikad `subagent_fork`** — fork nosi kontekst glavne sesije (istoriju i
    > razmišljanje glavnog agenta), pa kritika ne bi bila nezavisna.
 
-   **Uvek navedi jak model:** `provider: deepseek-official`,
-   `model: deepseek-flash`. Podagent inače nasledi model sesije; u epizodi 1 je
-   pokrenut na `gemini-flash-lite` i za 5 s vratio praznu kritiku
-   (`pregledano: 427, grešaka: 0`) — lažni prolaz.
+   **Kritičar ide na isti model kao i glavna sesija** (model koji je pokrenuo
+   ovog podagenta). U praksi to znači: ne navodi `provider`/`model`/`reasoning_effort`
+   u pozivu `subagent` — podagent nasleđuje rutu sesije. Ne pokušavaj da ga
+   prebaciš na drugi model iz skilla: ruta van sesije se odbija („child LLM route
+   … is not allowed for this Session"), a i mimoišla bi nameru nadređenog izbora.
+   Ako korisnik želi drugi model za kritiku, menja se **ceo sesijni model**
+   (glavni agent + kritičar zajedno), ne samo kritičar.
+
+   Ako ipak moraš da navedeš `reasoning_effort`, proveri sa
+   `list_subagent_models` koje rute su dozvoljene; model van nje → `subagent`
+   pada, i gubiš vreme. Bez izbora u pozivu, effort se nasleđuje od glavne
+   rute (ako pripadaju istoj ruti; nije isto kad dete ima drugu rutu).
+
+   Zašto: u epizodi 1 je kritičar slučajno pokrenut na `gemini-flash-lite` i vratio
+   praznu kritiku (`pregledano: 427, grešaka: 0`) — lažni prolaz. Bez izbora,
+   kritičar sledi **rutu sesije** i tu grešku više ne može da napravi: ruta je
+   ili ista kao glavna ili je nema (pa `subagent` javi grešku odmah, ne tiho).
 
    DSH nema registar imenovanih podagenata — ime se ne poziva, nego se
    definicija **prenosi kao uputstvo**:
@@ -231,6 +262,8 @@ srpska (`die Kathedrale = katedrala`, `die Audienz = audijencija`,
 pa onaj sa najviše blokova. Prvo pogledaj šta je izabrao.
 
 - `--lista` samo ispiše trake; `--traka N` bira N-tu titl-traku (`s:N`).
+- `--izlaz DIR` piše titl u DIR (npr. `--izlaz .`). Bez njega titl ide **pored
+  videa** — ako video stoji u roditeljskom folderu, korak 1 ga neće naći.
 - Ako javi malo blokova (< 80) — verovatno je „forced” traka; proveri `--lista`.
 - **Slikovni titl (PGS/VobSub) ne može** — to su slike. Skripta to kaže; tada
   treba spoljni `.deDE.srt` ili OCR na računaru (Subtitle Edit).

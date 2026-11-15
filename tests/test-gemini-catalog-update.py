@@ -146,6 +146,55 @@ missing_problems = m.diagnose(missing, "")
 check("model koji fali se prijavljuje", any("fale modeli" in p for p in missing_problems), repr(missing_problems))
 check("koren koji nije lista se prijavljuje", m.diagnose({"id": "llm-pi-ai"}, "") != [])
 
+# `deploy` ruta (2026-11-15): profilni default model ide preko Deploy platforme,
+# pa je ruta DOZVOLJENA. Pre ovoga je skripta pri svakom startu pisala
+# "neocekivana ruta 'deploy'" i izlazila sa 1.
+WITH_DEPLOY = (
+    "- id: llm-pi-ai\n"
+    "  config:\n"
+    "    providers:\n"
+    "      google:\n"
+    "        models:\n"
+    "          - id: gemini-flash-latest\n"
+    "          - id: gemini-flash-lite-latest\n"
+    "      deploy:\n"
+    "        displayName: Deploy\n"
+    "        apiKeyEnv: DEPLOY_API_KEY\n"
+    "        api: openai-completions\n"
+    "        baseURL: https://api-cdn.deploy.com/api/v1\n"
+    "        models:\n"
+    "          - id: zai-org/glm-5.3-flash\n"
+    "          - id: deepseek-ai/deepseek-v4.1-flash-1017\n"
+)
+with_deploy = m.parse(WITH_DEPLOY)
+check(
+    "`deploy` ruta se ne prijavljuje kao neocekivana",
+    m.diagnose(with_deploy, WITH_DEPLOY) == [],
+    repr(m.diagnose(with_deploy, WITH_DEPLOY)),
+)
+
+no_model = m.parse(WITH_DEPLOY.replace("          - id: deepseek-ai/deepseek-v4.1-flash-1017\n", ""))
+check(
+    "`deploy` ruta bez default modela se prijavljuje",
+    any("nema model" in p for p in m.diagnose(no_model, "")),
+    repr(m.diagnose(no_model, "")),
+)
+
+stolen_gemini = m.parse(WITH_DEPLOY + "          - id: gemini-flash-latest\n")
+check(
+    "Google model pod `deploy` se prijavljuje",
+    any("Google model" in p for p in m.diagnose(stolen_gemini, "")),
+    repr(m.diagnose(stolen_gemini, "")),
+)
+
+# Novi `deploy` unos ne sme da zaseni detekciju native rute.
+both = m.parse(WITH_DEPLOY.replace("      deploy:\n", "      deepseek-official:\n        models: []\n      deploy:\n"))
+check(
+    "native ruta se i dalje prijavljuje pored `deploy`",
+    any("DUPLICATE_ADAPTER" in p for p in m.diagnose(both, "")),
+    repr(m.diagnose(both, "")),
+)
+
 # ─────────────────────────── 5. main() end-to-end nad fajlom sa `!!js`
 
 print("\n5. main() prihvata tudji `!!js` i ne prepisuje tudje izmene")

@@ -16,7 +16,11 @@
 # Šta radi:
 #   1. (opciono) sačeka `--delay` sekundi — plugin ga zove detaširano i mora
 #      da stigne da vrati poruku korisniku pre nego što proces padne;
-#   2. `pkill -f 'dsh/lib/bin[.]js'` (pa `-9` ako se ne preda u ~3 s);
+#   2. ugasi TAČNO node proces dsh servera (enumeracija + `kill`, uz
+#      eksplicitno izbegavanje sebe i sopstvenih shell-predaka);
+#      `pkill -f` je UKLONJEN 2026-11-15 — gadao je i sam skript kad se
+#      obrazac `dsh/lib/bin.js` nadje u njegovom argv (vidi blok „KO SME DA
+#      UMRE" nize);
 #   3. detaširano podigne `~/.local/bin/dsh-termux` — PRAVI wrapper, jer on
 #      pri svakom bootu ponovo primenjuje Android zakrpe (hard-link,
 #      dir-fsync, ripgrep shim, koffi, require-builtin fallback, PWA
@@ -56,13 +60,88 @@ if [ "$DELAY" != 0 ]; then sleep "$DELAY"; fi
 
 log "restart: kill + relaunch (delay=${DELAY}s)"
 say "restart-dsh: gasim dsh…"
-pkill -f 'dsh/lib/bin[.]js' 2>/dev/null
+
+# ── KO SME DA UMRE ─────────────────────────────────────────────────────────
+# `pkill -f` poredi obrazac sa PUNOM komandnom linijom svakog procesa, ne
+# samo sa node-om. Ako je skriptu pokrenuo proces ciji argv SADRZI tekst
+# `dsh/lib/bin[.]js` (npr. agentov `bash -c "bash …/restart-dsh.sh"` ili bilo
+# koja shell komanda koja pominje taj obrazac), `pkill -f` ubije i NJEGA —
+# tj. samu sebe — i to tacno izmedju `log`-a i `setsid nohup` relancha.
+# Desilo se 2026-11-15: log ima „restart: kill + relaunch", ali NEMA ni „OK"
+# ni „NEUSPEH", a dsh-web.log nije bio ni dodirnut — skript je umro na pkill.
+#
+# Zato se sada gadja TACNO node proces dsh-a, ne obrazac. Pravilo izbora je
+# namerno ASIMETRICNO, jer je prva verzija fix-a bila pogresna:
+#   • SCRIPT i njegovi PREDCI koji NISU dsh server su zasticeni (shell,
+#     Termux session, zygote) — njih ne smemo da ubijemo;
+#   • ALI dsh server se UBIJA I KADA JE PREDAK. To je uobicajen slucaj:
+#     pluginu i agentu je dsh roditelj (`/restart-dsh` iz GUI-ja ide bas tako).
+#     Testirano 2026-11-15 na ovoj masini: dsh (22641) je roditelj shell-a
+#     koji je pokrenuo skriptu, pa je „zastiti sve pretke" vratilo PRAZNU listu
+#     i restart nista ne bi uradio. Zato identitet („da li je ovo dsh?")
+#     pobeđuje parenje („da li je ovo moj predak?").
+DSH_BIN_GLOB='@deepseek-ai/dsh/lib/bin.js'
+
+self_chain() {
+	# $$ → PPID → … → 1; svaki PID novi red. Termux se ume prekinuti u
+	# `zygote`, pa se staje i na PPID<=1 ili na ciklusu.
+	local pid=$$
+	local guard=0
+	while [ -n "$pid" ] && [ "$pid" -gt 1 ] && [ "$guard" -lt 32 ]; do
+		printf '%s\n' "$pid"
+		pid=$(awk '/^PPid:/ {print $2}' "/proc/$pid/status" 2>/dev/null)
+		guard=$((guard + 1))
+	done
+}
+CHAIN=$(self_chain | sort -u)
+
+# PIDs of REAL dsh servers: the argv names the package's bin.js AND the `web`
+# subcommand. A shell that merely MENTIONS the pattern fails both tests.
+# An ancestor that IS a dsh server is still returned (see the note above).
+dsh_server_pids() {
+	ps -eo pid=,args= 2>/dev/null | awk -v chain="$CHAIN" -v self="$$" '
+		BEGIN { split(chain, c, "\n"); for (i in c) if (c[i] != "") ancestor[c[i]] = 1 }
+		{
+			pid = $1
+			$1 = ""
+			cmd = $0
+			# This script itself is never a candidate.
+			if (pid == self) next
+			if (cmd !~ /@deepseek-ai\/dsh\/lib\/bin[.]js/) next
+			if (cmd !~ /[ \t]web([ \t]|$)/) next
+			# Protection applies ONLY to non-dsh ancestors: shells, session,
+			# zygote. A dsh ancestor is the target, not a bystander.
+			if ((pid in ancestor) && (cmd !~ /node/)) next
+			print pid
+		}'
+}
+
+pids=$(dsh_server_pids)
+if [ -n "$pids" ]; then
+	# shellcheck disable=SC2086
+	kill $pids 2>/dev/null
+	log "restart: TERM na ${pids//$'\n'/ }"
+else
+	log "restart: nema zivog dsh servera (nista za TERM)"
+fi
 sleep 1
 # Ako se proces ne preda u ~3 s, pojačaj — inače bi dva dsh-a držala isti port.
-if pgrep -f 'dsh/lib/bin[.]js' >/dev/null 2>&1; then
+pids=$(dsh_server_pids)
+if [ -n "$pids" ]; then
 	sleep 2
-	pkill -9 -f 'dsh/lib/bin[.]js' 2>/dev/null
+	pids=$(dsh_server_pids)
+	if [ -n "$pids" ]; then
+		# shellcheck disable=SC2086
+		kill -9 $pids 2>/dev/null
+		log "restart: KILL -9 na ${pids//$'\n'/ }"
+	fi
 	sleep 1
+fi
+# Bezbednosna mreza: skript nikad ne sme da prezivi ovde kao ziv proces koji
+# je pozvao `kill -9` na sopstveni proces — provera da smo i dalje mi.
+if [ "$(awk '/^PPid:/ {print $2}' "/proc/$$/status" 2>/dev/null)" = "" ]; then
+	say "[x] restart-dsh: izgubio sam vezu sa roditeljem — prekidam"
+	exit 1
 fi
 
 say "restart-dsh: podižem dsh preko $WRAPPER…"

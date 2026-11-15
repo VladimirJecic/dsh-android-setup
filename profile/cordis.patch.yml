@@ -18,15 +18,86 @@
         models:
           - id: gemini-flash-latest
           - id: gemini-flash-lite-latest
+      deploy:
+        displayName: Deploy
+        apiKeyEnv: DEPLOY_API_KEY
+        api: openai-completions
+        baseURL: https://api-cdn.deploy.com/api/v1
+        # Default effort za CELU rutu. `high` je pun kvalitet; `max` je za
+        # prevodjenje bacanje (mnogo reasoning-a, mnogo sporije).
+        reasoning: high
+        # `compat.thinkingFormat` se NE postavlja: auto-detekcija za ovaj
+        # URL daje `openai` + `reasoning_effort`, sto Deploy dokumentuje.
+        models:
+          # ----------------------------------------------------------------
+          # GLM-5.3-Flash (Z.ai) preko Deploy platforme.
+          #
+          # `zai-org/glm-5.3-flash` NE postoji u pi-ai katalogu, pa bez
+          # izricitih polja model ostaje `reasoning: false`, bez slika, a
+          # effort se ne bira — Deploy tada primenjuje svoj default `max`.
+          # To je realno kostalo (sesija ep12, 15.11.2026): 149K output
+          # tokena i ~30s po step-u, dok je DeepSeek-Flash za isti posao
+          # trosio 40K i ~7s. Zato je sve deklarisano rucno.
+          # ----------------------------------------------------------------
+          - id: zai-org/glm-5.3-flash
+            contextWindow: 1000000
+            maxTokens: 131072
+            # Nativno multimodal; bez ovoga `read_image` pada sa
+            # "does not declare image input".
+            input: [ text, image ]
+            # Kljucevi su pi-ai nivoi, vrednosti STVARNI wire string u
+            # `reasoning_effort`. Deploy dokumentacija (GLM-5.3-Flash) navodi
+            # tacno `low`, `high`, `max`, sa defaultom `max`. `medium`/`xhigh`
+            # su namerno izostavljeni (pinuju se na null = nije podrzano), a
+            # `off` se ne nudi jer ga Deploy ne dokumentuje.
+            reasoningEfforts:
+              low: low
+              high: high
+              max: max
+            compat:
+              # Deploy dokumentuje `max_completion_tokens` (auto-detekcija na
+              # ovom URL-u bi poslala `max_tokens`, jer isNonStandard zavisi
+              # od URL-a, ne od modela).
+              maxTokensField: max_completion_tokens
+          # ----------------------------------------------------------------
+          # DeepSeek-V4.1-Flash-1017 preko Deploy platforme.
+          #
+          # `reasoningEfforts` je OBAVEZAN da bi picker pokazao nivo misljenja:
+          # pi-ai za rucno deklarisan model nema katalog unos, pa bi model
+          # ostao `reasoning: false` i dropdown bi rekao "no reasoning effort
+          # levels" (provereno 2026-11-15 preko
+          # /composer-extras/api/debug-provider-check).
+          #
+          # Deploy dokumentacija (DeepSeek-V4.1-Flash-1017) podrzava tacno
+          # `none`, `low`, `high`, `max`, sa defaultom `high`. Zato su
+          # `medium`/`xhigh`/`minimal` NAMERNO izostavljeni — nedeclarisani
+          # nivo se pinuje na `null` (nije podrzan), pa se ne moze izabrati
+          # nivo koji bi Deploy odbio.
+          #
+          # `"off": none` MORA biti pod navodnicima: goli `off:` je u YAML-u
+          # 1.1 BOOLEAN (False), ne string, pa kljuc tiho postaje `false` i
+          # `off` nivo nestane iz pickera. Isto vazi za `on`/`yes`/`no`.
+          # Vrednost `none` se salje kao literalan string `reasoning_effort:
+          # "none"` — bez nje bi "off" znacilo "posalji nista", a Deploy bi
+          # primenio svoj default `high`, tj. "off" bi tiho mislio.
+          # ----------------------------------------------------------------
+          - id: deepseek-ai/deepseek-v4.1-flash-1017
+            reasoningEfforts:
+              "off": none
+              low: low
+              high: high
+              max: max
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: deploy
+    model: deepseek-ai/deepseek-v4.1-flash-1017
+    reasoningEffort: max
+
 - id: ui-settings-general
   name: "@deepseek-ai/dsh-client-ui-settings-general"
   config:
     welcomeNoticeVersion: 2026-09-28.1
-- id: agent-default-model
-  name: "@deepseek-ai/dsh-agent-default-model"
-  config:
-    provider: google
-    model: gemini-flash-lite-latest
 # Auto-compact na 60% konteksta: vidi blok "preset-compaction" na kraju fajla.
 #
 # Vazno: `- id: compaction-basic` ovde NE pomaze. Web bundle taj (host) red
@@ -520,7 +591,8 @@
         name: '@deepseek-ai/dsh-skill-filesystem'
         config:
           customSkillDirs:
-            - !!js process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@deepseek-ai/dsh-agent-preset/package.json')), 'skills')
+            - !!js process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@deepseek-ai/dsh-agent-preset/package.json')),
+              'skills')
       - id: tool-skill
         name: '@deepseek-ai/dsh-tool-skill'
       - id: present
@@ -531,4 +603,5 @@
       - id: tool-plugin-market
         name: '@deepseek-ai/dsh-plugin-market/tools'
         disabled: !!js "!ctx.get('profileContext')"
+
 # <<< preset-compaction <<<

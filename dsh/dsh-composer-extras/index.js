@@ -701,7 +701,13 @@ async function handleBranchSession(ctx, req, res) {
     // za SLEDEĆI request, pa mora pre `prompt`. Isti par koji koristi i
     // gemini-seek-smart (klijentski hook, GEMINI_SEEK_SCHEDULE).
     // Može se preskočiti (`smart:false`) ili zameniti (`provider`/`model`).
-    const smart = payload.smart !== false
+    // OD 2026-11-15 smart start je ISKLJUCEN i na ovoj ruti: `smart` je
+    // podrazumevano `false`, pa branchovana sesija krece na profilnom default
+    // modelu (deploy/deepseek-v4.1-flash-1017) umesto na Gemini-ju. Eksplicitno
+    // `smart:true` (ili `--model` u branch.sh) i dalje radi — ruta je time
+    // jedina preostala ulazna tacka za smart dok je prekidac u client.js
+    // (GEMINI_SEEK_ENABLED) iskljucen. Vidi ~/dsh/rules/02-smart-mode.md.
+    const smart = payload.smart === true
     const provider = typeof payload.provider === 'string' && payload.provider !== ''
       ? payload.provider
       : (smart ? 'google' : undefined)

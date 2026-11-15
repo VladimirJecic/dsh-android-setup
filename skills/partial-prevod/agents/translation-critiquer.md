@@ -20,8 +20,11 @@ ne možeš da pročitaš ceo paket i oceniš svaki blok — **ne vraćaj praznu 
 („sve je u redu"). Umesto toga napiši u `kritika.json`:
 
 ```json
-{"greska": "model preslab za ovaj zadatak — pokreni kritiku na deepseek-flash"}
+{"greska": "model preslab za ovaj zadatak — pokreni kritiku ponovo na modelu glavne sesije"}
 ```
+
+Ti radiš na onom modelu koji te je pokrenuo, pa drugi model ne možeš da biraš sam —
+greška ide glavnoj sesiji, koja odlučuje da li da promeni model sesije i ponovi.
 
 Prazna kritika `{"ispravke": [], "propusteno": []}` na paketu od nekoliko stotina
 blokova je **najgorši mogući ishod**: glavna sesija je morala da je ponovi, a

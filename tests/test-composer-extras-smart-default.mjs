@@ -286,28 +286,48 @@ const ctx = {
 // ───────────────────────────────────────────────────────────── učitaj plugin
 
 const source = readFileSync(CLIENT_PATH, "utf8");
-// eslint-disable-next-line no-new-func
-new Function("window", "require", "fetch", "document", "setTimeout", "setInterval", "console", source)(
-	window,
-	(id) => {
+
+/**
+ * Prekidač `GEMINI_SEEK_ENABLED` je od 2026-11-15 `false` u isporučenom
+ * bundle-u — smart se ne pali sam, ne prati branch oznaku, i 😎 dugme se ne
+ * montira u composer. Celo pravilo i dalje živi u kodu, pa ovaj test NE
+ * isključuje sebe: deo koristi bundle onakav kakav jeste (sekcija 0 ispod),
+ * a sve ostale sekcije koriste isti izvor sa prekidačem na `true` — tako
+ * ostaju pokriveni 300k guard, restart regresija i 429 fallback, koji bi se
+ * jednim klikom vratili u pogon.
+ */
+const sourceSmartOn = source.replace(
+	/var GEMINI_SEEK_ENABLED = false;/,
+	"var GEMINI_SEEK_ENABLED = true;",
+);
+if (sourceSmartOn === source) throw new Error("ne nalazim `var GEMINI_SEEK_ENABLED = false;` u client.js");
+
+/** Učitaj jedan bundle i pokreni `apply(ctx)`. */
+function loadBundle(code) {
+	capturedFactory = null;
+	// eslint-disable-next-line no-new-func
+	new Function("window", "require", "fetch", "document", "setTimeout", "setInterval", "console", code)(
+		window,
+		(id) => {
+			if (id === "react") return React;
+			if (id === "react-dom") return ReactDOM;
+			throw new Error("unknown require: " + id);
+		},
+		globalThis.fetch,
+		document,
+		fakeSetTimeout,
+		fakeSetInterval,
+		console,
+	);
+	if (capturedFactory === null) throw new Error("plugin se nije registrovao preko __ModuleLoader__");
+	const loaded = capturedFactory((id) => {
 		if (id === "react") return React;
 		if (id === "react-dom") return ReactDOM;
 		throw new Error("unknown require: " + id);
-	},
-	globalThis.fetch,
-	document,
-	fakeSetTimeout,
-	fakeSetInterval,
-	console,
-);
-
-if (capturedFactory === null) throw new Error("plugin se nije registrovao preko __ModuleLoader__");
-const mod = capturedFactory((id) => {
-	if (id === "react") return React;
-	if (id === "react-dom") return ReactDOM;
-	throw new Error("unknown require: " + id);
-});
-mod.apply(ctx);
+	});
+	loaded.apply(ctx);
+	return loaded;
+}
 
 // ──────────────────────────────────────────────────────────────── asertacije
 
@@ -321,6 +341,34 @@ function check(name, cond, detail = "") {
 
 const GEMINI = { provider: "google", model: "gemini-flash-lite-latest" };
 const DEEPSEEK = { provider: "deepseek-official", model: "deepseek-flash" };
+
+// ── 0. isporučeni bundle: smart mode je ISKLJUČEN, dugme se ne montira ───
+console.log("\n0. isporučeni bundle (2026-11-15): smart OFF, nema 😎 dugmeta");
+{
+	loadBundle(source);
+	const inputLeft = registered.get("conversation.input.left");
+	check(
+		"😎 dugme NIJE registrovano u composer traci",
+		!(inputLeft && inputLeft.has("composer-extras-gemini-seek")),
+		String(inputLeft && [...inputLeft.keys()].join(",")),
+	);
+	// Ostala dugmad ne smeju da stradaju zbog prekidača.
+	check("ostala dugmad u traci su i dalje tu (paperclip)", !!(inputLeft && inputLeft.has("composer-extras-paperclip")));
+	check("ostala dugmad u traci su i dalje tu (context guard)", !!(inputLeft && inputLeft.has("composer-extras-context-guard")));
+
+	// Isto tako: nijedan automatski put ne sme da prebaci model na Gemini.
+	const id = "session-shipped-blank";
+	reset(id);
+	sessionRows = { [id]: { id, blank: true } };
+	setContext(id, undefined);
+	selects.length = 0;
+	loadBundle(source);
+	await new Promise((r) => setTimeout(r, 0));
+	check("prazna sesija sa isporucenim bundle-om: model NIJE diran", selects.length === 0, JSON.stringify(selects));
+}
+
+// Sve ostalo testira ISTU logiku sa prekidačem uključenim.
+loadBundle(sourceSmartOn);
 
 function pickedGemini() {
 	return selects.some((s) => s.provider === GEMINI.provider && s.model === GEMINI.model);

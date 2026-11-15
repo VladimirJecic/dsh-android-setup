@@ -90,6 +90,30 @@ Zatvoren tab / sumnja → **hard refresh**; ako i to ne pomogne → `restart-dsh
 - Oznaka „ova sesija je smart-branched" je u `localStorage` i preživljava
   reload i restart.
 
+## Poruka drugoj sesiji (`message-session`)
+
+- **Kanal:** `POST /composer-extras/api/prompt-session` (loopback, bez tokena)
+  sa `{sessionId, text, mode}`. Host prosleđuje u
+  `sessionController.prompt`: `mode === "steer"` → `agent.steer()`, svaka druga
+  vrednost → `agent.followup()`.
+- **Skill:** `message-session` (`~/.claude/skills/message-session`, symlink u
+  `~/.dsh/skills`). Skripta `message-session.sh`.
+- **Session ID je OBAVEZAN argument — nikad se ne pogađa.** 2026-11-15 je prva
+  poruka poslata tako što je ciljna sesija pronađena `grep`-om po logovima; to
+  je pogodilo, ali je rizik: ako se u međuvremenu jedna sesija završi a druga
+  počne, poruka ode **pogrešnoj**. Zato skripta pre slanja ispiše identitet
+  cilja (naslov iz `session/title` eventa, cwd, model, broj turn-ova, vreme
+  poslednje aktivnosti), a `--check` samo prikaže bez slanja.
+- **`--steer` je default (odluka 2026-11-15):** poruka ulazi u **sledeći korak**
+  tekućeg turna; ako sesija miruje, `send(..., wakeup=true)` → `wakeDriver()`
+  otvara novi turn odmah (`while (await this.turn())`), pa steer nikad ne
+  „izvisi". `--queue` (`followup`) se obrađuje tek na granici turna i koristi
+  se kad poruka sme da čeka.
+- **Provereno 2026-11-15:** poruka poslata mirnoj GLM sesiji je probudila,
+  obradila i odgovorila `OK` (turn 4, `user/message → assistant/message →
+  step/end → turn/end`).
+- Skripta odbija slanje sebi (`--from` == cilj, exit 3) osim uz `--force`.
+
 ## Pravila za agenta u sesiji
 
 - **„uplati" = `uplati` skill** — učitaj skill, ne izmišljaj IPS QR. Broj računa

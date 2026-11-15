@@ -359,6 +359,27 @@ window.__ModuleLoader__.load({
 			{ provider: "google", model: "gemini-flash-lite-latest", kind: "count", count: 2, windowMs: 60000 },
 			{ provider: "deepseek-official", model: "deepseek-flash", kind: "cooldown", cooldownMs: 60000 },
 		];
+
+		/**
+		 * GLAVNI PREKIDAČ smart moda (2026-11-15).
+		 *
+		 * `false` = smart mode je ISKLJUČEN: ne pali se sam ni u praznoj novoj
+		 * sesiji, ne prati branch „smart start" oznaku, i 😎 dugme se NE
+		 * montira u composer (ikona je uklonjena iz trake). Celo stanje mašine
+		 * ostaje u kodu — vraćanje je jedna izmena ove konstante na `true` i
+		 * hard refresh taba (vidi `~/dsh/rules/02-smart-mode.md`).
+		 *
+		 * Zašto prekidač, a ne brisanje: korisnik je 2026-11-15 tražio da
+		 * default model bude `deploy/deepseek-v4.1-flash-1017` i da smart „za
+		 * sada" ne startuje nove sesije. Brisanje bi izgubilo 429-fallback,
+		 * 300k guard i istoriju odluka koje ovaj plugin nosi; prekidač ih
+		 * čuva netaknute, ali van puta.
+		 *
+		 * Ne dira 429 fallback (vidi `ensureGeminiSeekHook`): on reaguje na
+		 * model koji je STVARNO pukao na Google ruti, pa sa isključenim
+		 * smart-om nema šta da uradi — sesija nikad ni ne ode na Gemini.
+		 */
+		var GEMINI_SEEK_ENABLED = false;
 		var geminiSeekState = {};
 		var AGENT_ERROR_429_PATTERN = /RESOURCE_EXHAUSTED|"code"\s*:\s*429/;
 		/** Poslednja 429 greska na koju je ovaj tab reagovao, po sesiji. Ne zivi u
@@ -784,6 +805,15 @@ window.__ModuleLoader__.load({
 				settled.notify = notify;
 				return;
 			}
+			// Smart mode je globalno isključen (2026-11-15): nijedan automatski
+			// put ga ne sme upaliti — ni prazna nova sesija, ni branch „smart
+			// start" oznaka, ni `branch-info.smart`, ni star `…-on-` ključ u
+			// localStorage-u. Odluka se sedne kao trajno „off" za ovu sesiju i
+			// model se NE dira (default model profila ostaje na snazi).
+			if (!GEMINI_SEEK_ENABLED) {
+				geminiSeekState[sessionId] = { enabled: false, notify: notify };
+				return;
+			}
 			var off = sessionSmartOff(sessionId);
 			var marked = sessionSmartMarked(sessionId);
 			if (!off && (geminiSeekDefaultEnabled(ctx, sessionId) || marked)) {
@@ -872,6 +902,15 @@ window.__ModuleLoader__.load({
 		 * @param options.attempt - internal retry counter for the context wait. */
 		function activateGeminiSeek(ctx, sessionId, notify, options) {
 			var settings = options || {};
+			// Smart mode je globalno isključen (2026-11-15): nijedan pozivalac —
+			// ni mount put, ni branch-info, ni preostali ručni toggle — ne sme
+			// prebaciti model na Gemini. Ovo je poslednja linija odbrane, ispod
+			// `decideGeminiSeekOnMount`-ove rane odluke.
+			if (!GEMINI_SEEK_ENABLED) {
+				delete geminiSeekContextPending[sessionId];
+				geminiSeekState[sessionId] = { enabled: false, notify: notify };
+				return;
+			}
 			var verdict = geminiContextVerdict(ctx, sessionId);
 			// Granica od 300k: sesija koja je prerasla Gemini free tier se NE
 			// vraća na Gemini — smart se gasi za tu sesiju umesto da napravi
@@ -2899,6 +2938,10 @@ window.__ModuleLoader__.load({
 				// korisnik ne klikne 😎 (2026-10-07: ranije se palio svuda).
 				useEffect(function () {
 					if (sessionId === undefined) return;
+					// Smart mode je isključen (2026-11-15): ne instaliraj ni submit
+					// wrap ni 429-watcher. Time nestaje i auto-prebacivanje modela
+					// i auto-„try again" — model u sesiji menja samo korisnik.
+					if (!GEMINI_SEEK_ENABLED) return;
 					ensureGeminiSeekHook(ctx, sessionId);
 					var notify = function () { setTick(function (n) { return n + 1; }); };
 					// Odluka je izdvojena u `decideGeminiSeekOnMount` jer ume da se
@@ -2961,13 +3004,19 @@ window.__ModuleLoader__.load({
 				);
 			}
 
-			ctx.slots.inject("conversation.input.left", function () {
-				return ctx.slots.register({
-					name: "conversation.input.left",
-					id: "composer-extras-gemini-seek",
-					order: 9,
-				}, GeminiSeekButton);
-			});
+			// 😎 dugme se NE montira dok je smart mode isključen (2026-11-15):
+			// slot uopšte nema seat, pa ikona nestaje iz trake bez CSS-a i bez
+			// diranja tuđeg bundle-a. Komponenta i sva njena logika ostaju;
+			// vraćanje = `GEMINI_SEEK_ENABLED = true` + hard refresh.
+			if (GEMINI_SEEK_ENABLED) {
+				ctx.slots.inject("conversation.input.left", function () {
+					return ctx.slots.register({
+						name: "conversation.input.left",
+						id: "composer-extras-gemini-seek",
+						order: 9,
+					}, GeminiSeekButton);
+				});
+			}
 
 			/* PEAK-HELPERS-START */
 			/**

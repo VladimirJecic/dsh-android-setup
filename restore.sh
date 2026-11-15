@@ -201,6 +201,11 @@ for s in "$SRC"/skills/*/; do
   do_run "mkdir -p '$H/.dsh/skills/$name'"
   # ceo skill, ne samo SKILL.md — neki nose i skripte (branch.sh, uplati.py, …)
   do_run "cp -r '$s'./* '$H/.dsh/skills/$name'/"
+  # Arhiva zivi na /storage/emulated/0 (media_rw), gde git NE cuva exec bit
+  # (svi fajlovi su 100644), pa bi posle restore-a skripte bile neizvrsne.
+  # Ovde se vraca +x na svaki .sh/.py unutar skill-a. Chmod ide na ~/.dsh
+  # (Termux private storage), pa tamo prava i ostaju.
+  do_run "find '$H/.dsh/skills/$name' -type f \\( -name '*.sh' -o -name '*.py' \\) -exec chmod 700 {} +"
   good "skill: $name"
 done
 say

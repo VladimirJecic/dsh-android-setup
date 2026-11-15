@@ -491,6 +491,10 @@ def _odvojivi_glagoli(text, has_sich):
             if re.search(r"(en|ern|eln)$", lg) and lg not in NAMES:
                 if lg in NIJE_ODVOJIV_GLAGOL:
                     break
+                # STOP/SKIP na pogodjeni infinitiv: „Orden … auf” -> „auforden”
+                # je artefakt (čestica pripada drugom glagolu), ne reč.
+                if cest + lg in STOP or cest + lg in SKIP:
+                    continue
                 potroseno |= {poz, cest_poz}
                 nepoznate.append((cest + lg, f"{w}…{cest}"))
                 break

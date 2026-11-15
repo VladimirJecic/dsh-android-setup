@@ -41,6 +41,15 @@ GOOGLE_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest"]
 NATIVE_DEEPSEEK_ROUTE = "deepseek-official"
 NATIVE_DEEPSEEK_MODELS = ["deepseek-flash"]
 
+# Ruta koju OVAJ setup deklarise pored `google` (od 2026-11-15): Deploy
+# platforma, OpenAI-compatible gateway. `deploy` je profilni default model, pa
+# skripta ne sme da ga prijavi kao "neocekivanu rutu" pri svakom startu — do
+# tada je jedina dozvoljena ruta bila `google`. Skripta rutu NE odrzava (njen
+# katalog, `reasoningEfforts` i default model zive u patch sloju i menjaju se
+# rucno); proverava samo da postoji i da joj nije ukraden Gemini model.
+DEPLOY_ROUTE = "deploy"
+DEPLOY_MODEL = "deepseek-ai/deepseek-v4.1-flash-1017"
+
 BODY = """# Your patch layer for this dsh profile, applied after every bundle layer:
 # a top-level YAML array of loader patch entries (id-targeted config
 # overrides, disables, and insert lists; `!!js` expressions allowed).
@@ -130,17 +139,20 @@ def find_entry(doc, entry_id):
     return None
 
 
-def google_models(entry):
-    """Return the model ids configured for the `google` route, or None."""
+def route_models(entry, route):
+    """Return the model ids configured for one route, or None."""
     try:
-        providers = entry["config"]["providers"]
-        route = providers["google"]
-        models = route["models"]
+        models = entry["config"]["providers"][route]["models"]
     except (KeyError, TypeError):
         return None
     if not isinstance(models, list):
         return None
     return [m.get("id") for m in models if isinstance(m, dict)]
+
+
+def google_models(entry):
+    """Return the model ids configured for the `google` route, or None."""
+    return route_models(entry, "google")
 
 
 def diagnose(doc, text):
@@ -172,7 +184,7 @@ def diagnose(doc, text):
         problems.append("llm-pi-ai config.providers nije mapa")
         return problems
 
-    foreign = sorted(k for k in providers if k != "google")
+    foreign = sorted(k for k in providers if k not in ("google", DEPLOY_ROUTE))
     for route in foreign:
         if route == NATIVE_DEEPSEEK_ROUTE:
             problems.append(
@@ -181,6 +193,17 @@ def diagnose(doc, text):
             )
         else:
             problems.append(f"neocekivana ruta {route!r} u llm-pi-ai")
+
+    # `deploy` je dozvoljena ruta, ali mora da nosi model koji joj pripada:
+    # Gemini model pod `deploy` bi tiho nestao iz `google` kataloga, a Deploy
+    # bi ga odbio tek na prvom zahtevu.
+    deploy_models = route_models(entry, DEPLOY_ROUTE)
+    if deploy_models is not None:
+        if DEPLOY_MODEL not in deploy_models:
+            problems.append(f"ruta {DEPLOY_ROUTE!r} nema model {DEPLOY_MODEL!r}")
+        stolen = [m for m in deploy_models if m in GOOGLE_MODELS]
+        if stolen:
+            problems.append(f"ruta {DEPLOY_ROUTE!r} sadrzi Google model(e): {stolen}")
 
     models = google_models(entry)
     if models is None:

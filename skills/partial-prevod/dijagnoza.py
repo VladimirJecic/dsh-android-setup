@@ -11,6 +11,11 @@ Upotreba:
 
        "LEX": {"mut": "", "aufschlagen": ""}
 
+   Skelet uvek sadrži i prazne liste STOP, NAMES, NIJE_KOGNAT i prazan
+   rečnik SKIP — pa skripta koja dodaje u bilo koju od njih ne pada na
+   KeyError.  Ako titl ne postoji, ispiše kandidate iz cwd i roditelja
+   (trag: izvuci_titl.py podrazumevano piše pored videa, a ne u epizodu).
+
    Posao agenta je samo da popuni svako prazno polje (ili da ključ prebaci u
    SKIP / NAMES — vidi SKILL.md).  Ne treba tražiti šta fali: sve je već tu.
    Postojeći sadržaj fajla se čuva; dodaju se samo novi ključevi.
@@ -43,11 +48,50 @@ def okno(tekstovi, z):
     return " | ".join(x for x in delovi if x)[:320]
 
 
+def nadji_srt(ime):
+    """Ako dati .srt ne postoji, nađi kandidata u cwd i roditelju.
+
+    Najčešći promašaj: izvuci_titl.py je pisao titl pored VIDEA (možda u
+    roditeljskom folderu), a dijagnoza se pokreće iz foldera epizode.
+    """
+    telo = os.path.basename(ime)
+    mesta = [os.getcwd(), os.path.dirname(os.getcwd().rstrip(os.sep)) or "/"]
+    kandidati = []
+    for folder in mesta:
+        try:
+            for f in sorted(os.listdir(folder)):
+                if f.endswith(".srt"):
+                    kandidati.append(os.path.join(folder, f))
+        except OSError:
+            pass
+    print(f"GREŠKA: nema titla '{ime}' u {os.getcwd()}", file=sys.stderr)
+    if kandidati:
+        import difflib
+        # predloži najbliži po imenu, ne prvi po abecedi
+        kandidati.sort(key=lambda k: -difflib.SequenceMatcher(
+            None, telo, os.path.basename(k)).ratio())
+        print("Najbliži nađeni .srt fajlovi:", file=sys.stderr)
+        for k in kandidati[:5]:
+            print(f"  {k}", file=sys.stderr)
+        print("Ako je titl ostao pored videa (proveri da je prava epizoda):\n"
+              f"  mv \"{kandidati[0]}\" .\n"
+              "ili sledeći put izvuci direktno u folder epizode:\n"
+              "  python3 izvuci_titl.py --izlaz . \"<video>.mkv\"", file=sys.stderr)
+    else:
+        print("Nema nijednog .srt fajla u ovom folderu ni u roditelju. "
+              "Prvo izvuci titl: python3 izvuci_titl.py --izlaz . \"<video>.mkv\"",
+              file=sys.stderr)
+    sys.exit(2)
+
+
 def main():
-    if len(sys.argv) < 2:
+    argumenti = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if not argumenti:
         print(__doc__)
         sys.exit(1)
-    srt = sys.argv[1]
+    srt = argumenti[0]
+    if not os.path.exists(srt):
+        nadji_srt(srt)
     g.ucitaj_recnik(srt)
     entries = g.ucitaj_srt(srt)
     redovi, nep = g.analiziraj(entries)
@@ -81,7 +125,7 @@ def main():
             lex[k] = ""
             novih += 1
         ctx[k] = okno(tekstovi, z)
-    for ime in ("SKIP", "NAMES"):
+    for ime in ("SKIP", "NAMES", "STOP", "NIJE_KOGNAT"):
         d.setdefault(ime, {} if ime == "SKIP" else [])
     with open(put, "w", encoding="utf-8") as fh:
         json.dump(d, fh, ensure_ascii=False, indent=1)

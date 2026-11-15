@@ -32,7 +32,7 @@ lokalni pluginovi **`dsh-composer-extras`** i **`dsh-chat-jump-arrows`**.
 
 | Fajl | Tema | Otvori kad… |
 |---|---|---|
-| [`01-sesije.md`](01-sesije.md) | restart, hard refresh/HMR, modeli, sesije i grananje, pravila za agenta | restartuješ, menjaš `client.js`, brančuješ sesiju |
+| [`01-sesije.md`](01-sesije.md) | restart, hard refresh/HMR, modeli, sesije i grananje, poruka drugoj sesiji (`message-session`), pravila za agenta | restartuješ, menjaš `client.js`, brančuješ sesiju, šalješ poruku drugoj sesiji |
 | [`02-smart-mode.md`](02-smart-mode.md) | 😎 `gemini-seek-smart` — kada se pali sam, fail-closed guard, 429 | diraš smart pravilo ili model rotaciju |
 | [`03-kontekst-i-kompakcija.md`](03-kontekst-i-kompakcija.md) | token-metar, prozor, `auto: false`, context guard, pragovi | diraš kompakciju, guard, prag ili preset config |
 | [`04-instalacija.md`](04-instalacija.md) | instalacija dsh-a i pluginova, profile/bundles/patch, launcher, Android zamke | dižeš setup od nule ili dodaješ plugin |

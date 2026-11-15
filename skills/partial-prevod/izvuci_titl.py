@@ -6,9 +6,12 @@ Upotreba:
     python3 izvuci_titl.py <video.mkv> --lista      # samo ispiši trake
     python3 izvuci_titl.py <video.mkv> --traka 2    # 3. titl-traka (s:2)
     python3 izvuci_titl.py <video.mkv> --prepisi    # pregazi postojeći .srt
+    python3 izvuci_titl.py <video.mkv> --izlaz .    # napiši u tekući folder
 
 Piše <folder videa>/<ime videa>.deDE.srt i na kraju ispiše komandu za render
-preko skilla burn-subtitle.
+preko skilla burn-subtitle.  Ako je video u roditeljskom folderu (a radni
+folder je epizoda), OBAVEZNO dodaj `--izlaz .` — inače titl ode pored videa i
+sledeći korak (dijagnoza nad epizodom) padne na „nema titla”.
 
 Kako bira traku:  tekstualni titl (subrip/ass/ssa/webvtt/mov_text) sa jezikom
 ger/deu/de ili naslovom "Deutsch/German".  Prednost ima pun titl: ne "forced",
@@ -73,13 +76,24 @@ def ispisi(titlovi):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    # opcije koje uzimaju vrednost: njihova vrednost nije video
+    S_VREDNOSCU = {"--traka", "--izlaz"}
+    args, preskoci = [], False
+    for a in sys.argv[1:]:
+        if preskoci:
+            preskoci = False
+            continue
+        if a in S_VREDNOSCU:
+            preskoci = True
+            continue
+        if not a.startswith("--"):
+            args.append(a)
     if not args:
         print(__doc__)
         sys.exit(1)
     video = args[0]
     if not os.path.exists(video):
-        sys.exit(f"nema fajla {video}")
+        sys.exit(f"nema fajla {video} — redosled je: izvuci_titl.py \"<video>\" [--izlaz DIR] [--traka N]")
     streams = sondiraj(video)
     titlovi = [opis(s) for s in streams if s.get("codec_type") == "subtitle"]
     if not titlovi:
@@ -117,6 +131,12 @@ def main():
 
     stem = os.path.splitext(os.path.basename(video))[0]
     folder = os.path.dirname(os.path.abspath(video))
+    if "--izlaz" in sys.argv:
+        i = sys.argv.index("--izlaz")
+        if i + 1 >= len(sys.argv):
+            sys.exit("GREŠKA: --izlaz traži folder, npr. --izlaz .")
+        folder = os.path.abspath(sys.argv[i + 1])
+        os.makedirs(folder, exist_ok=True)
     izlaz = os.path.join(folder, stem + ".deDE.srt")
     print(f"\nizabrana traka #{izbor['index']} ({izbor['kodek']}, {izbor['naslov'] or 'bez naslova'})")
     if os.path.exists(izlaz) and "--prepisi" not in sys.argv:
