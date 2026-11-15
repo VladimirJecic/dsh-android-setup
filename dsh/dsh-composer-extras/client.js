@@ -1433,14 +1433,20 @@ window.__ModuleLoader__.load({
 		 * ugrađene „Branch into a new conversation" ikonice koja radi
 		 * `sessions.fork` i PREKOPIRAVA istoriju do tog mesta).
 		 *
+		 * `mode` ("fork" | "new") bira da li nova sesija nasleđuje istoriju —
+		 * vidi dropdown na dugmetu i `/branch` / `/branch-new` komande.
+		 *
 		 * `uiWorkspace` se traži lenjo (`ctx.get`) i sme da nedostaje: tada se
 		 * sesija i dalje napravi, samo ostane bez automatskog prebacivanja
 		 * prikaza — bolje nego da ceo plugin zavisi od tog servisa.
 		 */
-		function branchIntoNewSession(ctx, sessionId, prompt) {
+		function branchIntoNewSession(ctx, sessionId, prompt, mode) {
 			return callApi("/composer-extras/api/branch-session", {
 				prompt: prompt,
 				parentSession: sessionId,
+				// `fork` (default) = kopira istoriju; `new` = prazna sesija.
+				// Mod bira dropdown na dugmetu — nikad tekst prompta.
+				mode: mode === "new" ? "new" : "fork",
 			}).then(function (value) {
 				var newId = value && value.sessionId ? value.sessionId : undefined;
 				var uiWorkspace = ctx.get("uiWorkspace");
@@ -2440,17 +2446,25 @@ window.__ModuleLoader__.load({
 			}
 
 			/**
-			 * „Branch into new session" — dve unakrsne strelice.
+			 * „Prebaci u novu sesiju" — dve unakrsne strelice + dropdown za MOD.
 			 *
-			 * Uzme TRENUTNI draft iz composera i pošalje ga kao JEDINI prompt
-			 * nove, prazne sesije u istom workspace-u; zatim prebaci GUI na nju
-			 * (`uiWorkspace.openSession`). Istorija se NE kopira — to je razlika
-			 * u odnosu na ugrađenu branch ikonicu (`sessions.fork`) i razlog
-			 * zašto ovo zamenjuje pozivanje `branch-into-new-session` skilla.
+			 * Klik na strelice OTVARA meni sa dve opcije:
+			 *   • Fork (sa istorijom)   → nova sesija nasleđuje istoriju do zadnjeg
+			 *                             završenog turna, prompt ide na kraj
+			 *   • Nova (prazna)         → nova sesija dobija samo prompt
 			 *
-			 * Kompakcija je NAMERNO odvojena operacija: ovo dugme ne dira
-			 * sadržaj tekuće sesije.
+			 * Mod je ODLUKA ULAZA, ne tekst prompta — zato dropdown, a ne `--new`
+			 * marker koji bi se tumačio iz korisnikovog teksta. Isto bira i komanda:
+			 * `/branch` = fork, `/branch-new` = prazna.
+			 *
+			 * Draft se posle uspeha briše iz ovog composera (tekst je sada prompt NOVE
+			 * sesije); na grešci OSTAJE, da korisnik može da ispravi.
 			 */
+			var BRANCH_MODES = [
+				{ id: "fork", label: "Fork (sa istorijom)", hint: "Nova sesija zna sve do sada" },
+				{ id: "new", label: "Nova (prazna)", hint: "Samo ovaj prompt, bez istorije" },
+			];
+
 			function BranchIntoNewSessionButton(props) {
 				var session = props.session;
 				var sessionId = props.sessionId !== undefined && props.sessionId !== null
@@ -2460,46 +2474,117 @@ window.__ModuleLoader__.load({
 				var busy = busyState[0], setBusy = busyState[1];
 				var noteState = useState("");
 				var note = noteState[0], setNote = noteState[1];
+				/** Otvoren dropdown: `null` = zatvoren, inače sidro (DOM element). */
+				var menuState = useState(null);
+				var menuAnchor = menuState[0], setMenuAnchor = menuState[1];
 
 				var enabled = sessionId !== undefined && !busy;
+
+				function run(mode) {
+					setMenuAnchor(null);
+					if (sessionId === undefined || busy) return;
+					var draft = readDraft(ctx, sessionId);
+					if (draft.trim() === "") {
+						setNote("Prvo napiši prompt za novu sesiju.");
+						setTimeout(function () { setNote(""); }, 4000);
+						return;
+					}
+					setBusy(true);
+					setNote("");
+					branchIntoNewSession(ctx, sessionId, draft, mode)
+						.then(function (value) {
+							// Tekst je sada prompt NOVE sesije — obriši ga iz ovog
+							// composera, inače može da se pošalje u staru sesiju.
+							clearDraft(ctx, sessionId);
+							reportDiag({
+								where: "branch-new-session",
+								sessionId: String(sessionId),
+								mode: mode,
+								created: value && value.sessionId ? String(value.sessionId) : null,
+								historyShared: value ? String(value.historyShared) : null,
+							});
+						})
+						.catch(function (error) {
+							setNote("Greška: " + (error && error.message ? error.message : String(error)));
+							reportDiag({
+								where: "branch-new-session-failed",
+								mode: mode,
+								message: String(error && error.message ? error.message : error),
+							});
+						})
+						.then(function () { setBusy(false); });
+				}
 
 				return createElement(react.Fragment, null,
 					createElement("button", {
 						type: "button",
-						title: "Branch into new session — prazna sesija sa ovim promptom (bez istorije)",
-						"aria-label": "Branch into new session",
+						title: "Prebaci prompt u novu sesiju — izaberi: sa istorijom (fork) ili prazna",
+						"aria-label": "Prebaci u novu sesiju",
+						"aria-haspopup": "listbox",
+						"aria-expanded": menuAnchor === null ? "false" : "true",
+						"data-composer-extras": "branch",
 						disabled: !enabled,
-						onClick: function () {
+						onClick: function (event) {
 							if (sessionId === undefined || busy) return;
-							var draft = readDraft(ctx, sessionId);
-							if (draft.trim() === "") {
-								setNote("Prvo napiši prompt za novu sesiju.");
-								setTimeout(function () { setNote(""); }, 4000);
-								return;
-							}
-							setBusy(true);
-							setNote("");
-							branchIntoNewSession(ctx, sessionId, draft)
-								.then(function (value) {
-									// Tekst je sada prompt NOVE sesije — obriši ga iz
-									// ovog composera, inače ostaje tu i može da se
-									// pošalje u staru sesiju (Nalaz 1).
-									clearDraft(ctx, sessionId);
-									reportDiag({
-										where: "branch-new-session",
-										sessionId: String(sessionId),
-										created: value && value.sessionId ? String(value.sessionId) : null,
-									});
-								})
-								.catch(function (error) {
-									setNote("Greška: " + (error && error.message ? error.message : String(error)));
-								})
-								.then(function () { setBusy(false); });
+							if (menuAnchor !== null) { setMenuAnchor(null); return; }
+							setMenuAnchor(event && event.currentTarget ? event.currentTarget : true);
 						},
 						style: Object.assign({}, iconButtonStyle, { opacity: enabled ? 0.75 : 0.35 }),
 					}, branchArrowsIcon),
+					menuAnchor === null ? null : createElement(BranchModeMenu, {
+						anchor: menuAnchor,
+						modes: BRANCH_MODES,
+						onPick: run,
+						onClose: function () { setMenuAnchor(null); },
+					}),
 					note === "" ? null : createElement(InlineNote, { text: note })
 				);
+			}
+
+			/**
+			 * Meni dva moda grananja. Portaluje se u `document.body` iz istog razloga
+			 * kao file picker (vidi `modalPortal`) — `position: fixed` unutar
+			 * composera visi o pretku sa `transform`, ne o viewportu.
+			 */
+			function BranchModeMenu(props) {
+				var rows = props.modes.map(function (mode) {
+					return createElement("button", {
+						key: mode.id,
+						type: "button",
+						"data-composer-extras-branch-mode": mode.id,
+						onClick: function () { props.onPick(mode.id); },
+						style: {
+							display: "block",
+							width: "100%",
+							textAlign: "left",
+							padding: "8px 12px",
+							border: "none",
+							background: "transparent",
+							color: "inherit",
+							cursor: "pointer",
+							fontSize: 13,
+						},
+					},
+						createElement("div", { style: { fontWeight: 600 } }, mode.label),
+						createElement("div", { style: { fontSize: 11, opacity: 0.7 } }, mode.hint)
+					);
+				});
+				return modalPortal(createElement("div", {
+					"data-composer-extras": "branch-mode-menu",
+					"role": "listbox",
+					style: {
+						position: "fixed",
+						left: 12,
+						bottom: "calc(14px + env(safe-area-inset-bottom, 0px))",
+						zIndex: 60,
+						minWidth: 220,
+						padding: 6,
+						borderRadius: 10,
+						background: "var(--dsw-alias-bg-base, #fff)",
+						boxShadow: "0 6px 24px rgba(0,0,0,0.22)",
+						border: "1px solid rgba(127,127,127,0.25)",
+					},
+				}, rows));
 			}
 
 			ctx.slots.inject("conversation.input.left", function () {
@@ -2508,6 +2593,17 @@ window.__ModuleLoader__.load({
 					id: "composer-extras-branch-new-session",
 					order: 6,
 				}, BranchIntoNewSessionButton);
+			});
+
+			ctx.on("command/executed", function (_sourceSessionId, commandName, result) {
+				if (commandName !== "branch" && commandName !== "branch-new") return;
+				if (result === undefined || result === null || result.kind !== "success") return;
+				var text = typeof result.text === "string" ? result.text : "";
+				var match = /session-[0-9a-f-]{8,}/i.exec(text);
+				if (match === null) return;
+				var uiWorkspace = ctx.get("uiWorkspace");
+				if (uiWorkspace === undefined || typeof uiWorkspace.openSession !== "function") return;
+				openSessionWithRetry(uiWorkspace, match[0]);
 			});
 
 			/**
@@ -3240,6 +3336,14 @@ window.__ModuleLoader__.load({
 				var measuredState = useState(false);
 				var measured = measuredState[0];
 				var setMeasured = measuredState[1];
+				// Da li je u desnom sidebaru otvoren FAJL. Dok jeste, bedž se ne
+				// prikazuje — inače prekriva dugmad Podeli/Folder (2026-11-15).
+				// Ime promenljive je NAMERNO `docOpen` (a ne `docVisible`): prva
+				// verzija je imala `setDocVisible(!docOpen)` uz
+				// `if (docVisible) return null`, pa je bedž nestao UVEK.
+				var docOpenState = useState(false);
+				var docOpen = docOpenState[0];
+				var setDocOpen = docOpenState[1];
 				var anchorRef = useRef(null);
 				useEffect(function () {
 					function commit(next) {
@@ -3251,6 +3355,20 @@ window.__ModuleLoader__.load({
 						if (changed) setAnchor(next);
 					}
 					function measure() {
+						// Kad je u desnom sidebaru otvoren FAJL, njegova dugmad
+						// (Podeli / Folder) stoje baš gore-desno — tamo gde i
+						// ovaj bedž. Bedž ih je prekrivao (2026-11-15: „ne vidim
+						// dugme podeli"). Zato se bedž sklanja dok je pregled
+						// fajla otvoren: model je tada nebitan, a dugmad su
+						// jedina radnja koja treba da bude dostupna.
+						//
+						// PAZI: `data-textpreview-state` postoji u sva tri stanja
+						// (unsupported/loading/text) i znači „panel za fajl je
+						// otvoren". Ne koristi `[data-document-preview]` — on se
+						// dodaje samo u `text` stanju, pa bi MKV (unsupported)
+						// prošao kao „nema fajla".
+						var docOpen = document.querySelector("[data-textpreview-state]") !== null;
+						setDocOpen(docOpen);
 						var tabs = document.querySelector("[data-conversation-tabs]");
 						var corner = document.querySelector("[data-conversation-header-corner]");
 						var el = tabs || corner;
@@ -3289,6 +3407,9 @@ window.__ModuleLoader__.load({
 				}, [sessionId]);
 
 				if (!current) return null;
+				// Otvoren fajl u sidebaru -> skloni bedž, da dugmad Podeli/Folder
+				// ostanu vidljiva i klikabilna (2026-11-15).
+				if (docOpen) return null;
 
 				var seek = sessionId !== undefined ? geminiSeekState[sessionId] : undefined;
 				var seekSuffix = seek && seek.enabled ? " 😎" : "";
@@ -3402,12 +3523,19 @@ window.__ModuleLoader__.load({
 					color: "CanvasText",
 					border: "1px solid rgba(128,128,128,0.4)",
 					borderRadius: 8,
-					padding: "6px 10px",
+					padding: "4px 8px",
 					fontSize: 11,
 					lineHeight: 1.3,
 					boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
-					maxWidth: 200,
-					wordBreak: "break-word",
+					// Bedž stoji uz DESNU ivicu tab reda, a ispod njega je traka
+					// sa putanjom fajla. Ime modela je dugo
+					// (`deepseek-ai/deepseek-v4.1-flash-1017` = 38 znakova), pa je
+					// uz `maxWidth: 200` + `wordBreak: break-word` padao u 3 reda
+					// i time NARASTAO nadole preko te putanje (2026-11-15).
+					// Zato: jedan red, skraćeno sa `…`; puno ime je u `title`.
+					maxWidth: "min(46vw, 210px)",
+					whiteSpace: "nowrap",
+					overflow: "hidden",
 					pointerEvents: "none",
 				};
 				if (anchor) {
@@ -3423,11 +3551,27 @@ window.__ModuleLoader__.load({
 				// spot before the tab row has been measured.
 				if (!measured) wrapperStyle.visibility = "hidden";
 
+				// Prikazano ime: bez `vendor/` prefiksa, jer je ono najduži deo i
+				// najmanje korisno na telefonu. Puno ime ostaje u `title`.
+				var fullModel = current.model + seekSuffix;
+				var shownModel = String(current.model || "").split("/").pop() + seekSuffix;
+				wrapperStyle.title = fullModel;
+
 				return modalPortal(createElement("div", {
 					ref: wrapperRef,
 					style: wrapperStyle,
 				}, [
-					createElement("span", { key: "model" }, current.model + seekSuffix),
+					createElement("span", {
+						key: "model",
+						// `text-overflow` mora na SAM element koji nosi tekst —
+						// na flex kontejneru iznad se ignoriše.
+						style: {
+							overflow: "hidden",
+							textOverflow: "ellipsis",
+							whiteSpace: "nowrap",
+							minWidth: 0,
+						},
+					}, shownModel),
 					peakIcon,
 					peakPanel,
 				]));

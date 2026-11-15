@@ -256,6 +256,10 @@ const ctx = {
 		},
 	},
 	modelDirectories: { directoryFor },
+	/** Slušalaci preko `ctx.on` (plugin sluša `command/executed` za /btw). */
+	on(_name, _listener) {
+		return () => {};
+	},
 	get(name) {
 		if (name === "conversation") {
 			return {

@@ -24,6 +24,26 @@ Raspored (`GEMINI_SEEK_SCHEDULE` u `client.js`):
 | Bilo koja sesija sa eksplicitnim 😎 „off" (`…-off-<id>`) | NE — klik pobeđuje sve |
 | **Restart / hard refresh** velike sesije sa `…-on-<id>` oznakom | **NE** — vidi „Nepoznat kontekst" ispod |
 
+### Smart više NIJE default grananja (odluka 2026-11-15)
+
+`branch.sh` je ranije **uvek** slao `smart:true` + `google/gemini-flash-lite-latest`,
+a ruta to prosleđuje u `sessionController.selectModel` — a **taj put na kraju
+poziva `agentDefaultModel.saveSelection()`**, koji TRAJNO prepiše deployment
+default model u profilnom `cordis.patch.yml`. Posledica: svako grananje je
+tiho prebacivalo default model **za sve buduće sesije**, ne samo za novu.
+
+Zato je od 2026-11-15:
+
+- `branch.sh` default **`SMART=0`** — nova sesija kreće na profilnom defaultu;
+- smart se uključuje **samo izričito**: `--smart` ili `--model p/m`
+  (oba postavljaju `SMART=1`); `--no-smart` i dalje postoji da poništi;
+- odgovor rute (`smartModel=…`) pokazuje šta je stvarno izabrano.
+
+**Ko hoće smart, a ne želi da menja default:** neka izabere model ručno u
+toj sesiji, ili koristi 😎 prekidač — nijedno od toga ne dira profil.
+`selectModel` ostaje jedini put koji menja default, pa ga treba zvati samo kad
+je to baš namera.
+
 - „Prazna" = dsh-ov sopstveni `blank` flag iz `sessions.list`, i to **samo kad
   je lista stvarno stigla** (`phase === "ready"`). dsh klijent za nepoznatu
   sesiju počinje kao „conservatively blank" (`session.d.ts`), pa bi `blank: true`

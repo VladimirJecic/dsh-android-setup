@@ -121,6 +121,22 @@ function apply(ctx) {
       description: 'Restart the dsh server itself (kills and relaunches via the Termux wrapper) — unified restart-dsh command',
       handler: track(executeRestart),
     })
+    // `/branch` — isti posao kao dugme u composeru, bez GUI-ja (i za model/agent
+    // put). Mod se NE čita iz teksta: `/branch` uvek forkuje (default), a
+    // `/branch-new` pravi praznu sesiju — odluka je u imenu komande, kao i u
+    // dropdownu na dugmetu.
+    yield ctx.commands.register({
+      name: 'branch',
+      description: 'Prebaci prompt u novu sesiju sa kopijom istorije (fork) — glavna sesija nastavlja nesmetano',
+      input: { hint: '<prompt>' },
+      handler: track(executeBranch),
+    })
+    yield ctx.commands.register({
+      name: 'branch-new',
+      description: 'Prebaci prompt u novu PRAZNU sesiju (bez istorije)',
+      input: { hint: '<prompt>' },
+      handler: track(executeBranchNew),
+    })
   }, 'composer-extras: command lifecycle')
 
   ctx.effect(() => ctx.webServer.register({
@@ -209,12 +225,6 @@ function apply(ctx) {
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
-    path: '/composer-extras/api/branch-info',
-    handler: handleBranchInfo,
-  }), 'composer-extras: /composer-extras/api/branch-info route (da li je sesija smart-branched)')
-
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact',
     path: '/composer-extras/api/prompt-session',
     handler: (req, res) => handlePromptSession(ctx, req, res),
   }), 'composer-extras: /composer-extras/api/prompt-session route (prompt u POSTOJECU sesiju — npr. „try again")')
@@ -224,42 +234,6 @@ function apply(ctx) {
     path: '/composer-extras/api/compact',
     handler: (req, res) => handleCompactSession(ctx, req, res),
   }), 'composer-extras: /composer-extras/api/compact route (kompakcija na zahtev + pravi ishod)')
-}
-
-/**
- * GET ?sessionId=… → je li ta sesija branchovana sa smart startom.
- *
- * Klijentski `gemini-seek-smart` je per-session i po defaultu se pali samo ako
- * globalni localStorage default nije isključen; branch rutu to ne zanima, pa
- * bez ove provere indikator ostane „disabled" iako je model za prvi prompt
- * Gemini. Odgovor: `{smart, model}`.
- */
-async function handleBranchInfo(req, res) {
-  if (!isLoopbackRequest(req)) {
-    writeJson(res, 403, { ok: false, error: { code: 'forbidden', message: 'forbidden' } })
-    return
-  }
-  if (req.method !== 'GET') {
-    writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed' } })
-    return
-  }
-  try {
-    const url = new URL(req.url ?? '/', 'http://internal')
-    const sessionId = url.searchParams.get('sessionId')
-    if (!sessionId) {
-      writeJson(res, 400, { ok: false, error: { code: 'bad-request', message: 'missing "sessionId" query param' } })
-      return
-    }
-    writeJson(res, 200, {
-      ok: true,
-      value: {
-        smart: BRANCH_SMART_SESSIONS.has(sessionId),
-        model: BRANCH_SMART_SESSIONS.get(sessionId) ?? null,
-      },
-    })
-  } catch (error) {
-    writeJson(res, 400, { ok: false, error: { code: 'branch-info-error', message: error instanceof Error ? error.message : String(error) } })
-  }
 }
 
 /** Diagnostic: does ctx.llm actually resolve a {provider, model} pair right now?
@@ -352,20 +326,6 @@ const ANDROID_MIME_BY_EXT = {
 const SHARE_STAGE_DIR = '/storage/emulated/0/Download/dsh-share'
 /** Slike idu u Pictures/dsh — tamo ih galerija (i Photos biblioteka) vidi posle `termux-media-scan`. */
 const PICTURES_STAGE_DIR = '/storage/emulated/0/Pictures/dsh'
-
-/**
- * Branched sesije startovane „smart" (prvi prompt na Gemini), po sessionId.
- *
- * Klijent ovo čita preko `GET /composer-extras/api/branch-info` da za TU sesiju
- * uključi i svoj `gemini-seek-smart` režim i 😎 indikator. Bez toga bi model za
- * prvi prompt bio Gemini (server ga izabere), ali bi klijentski schedule/hook
- * ostali isključeni — indikator „disabled", a sesija bi posle prvog prompta
- * nastavila na DeepSeek-u umesto po smart rasporedu.
- *
- * In-memory: posle restarta servera se mapa isprazni, ali klijent tada već ima
- * trajnu localStorage oznaku po sesiji (`composer-extras-gemini-seek-on-<id>`).
- */
-const BRANCH_SMART_SESSIONS = new Map()
 
 function androidMimeOf(target) {
   const ext = extname(target).toLowerCase()
@@ -611,32 +571,38 @@ async function handleDeletePaths(req, res) {
   }
 }
 
-/** POST {prompt, parentSession?, cwd?} → napravi NOVU (praznu) sesiju u istom
- * workspace-u kao `parentSession` i prosledi joj `prompt`. Ne deli istoriju.
+/* ── Grananje u novu sesiju ───────────────────────────────────────────────
+ * JEDAN mehanizam, dva moda. Mod bira ULAZ, nikad tekst prompta:
  *
- * Radi u samom web serveru (`ctx.get('sessionController')`), pa se nova sesija
- * odmah pojavi u GUI-ju — u ISTOJ grupi (workspace) kao pozivajuća. Eksterni
- * `dsh headless` je namerno napušten: on sesiju upiše van workspace registra,
- * pa završi u „Ungrouped", i drži session.lock dok radi.
+ *   dugme u composeru → dropdown:  „Fork (sa istorijom)" | „Nova (prazna)"
+ *   `/branch <prompt>`            → fork  (default)
+ *   `/branch-new <prompt>`        → prazna sesija
  *
- * Ovo je jedina ruta koja menja stanje sesija; loopback + POST + JSON kao i
- * ostale Android/FS rute. */
+ * Fork: nova sesija nasleđuje istoriju izvorne do zadnjeg ZAVRŠENOG turna, a
+ * prompt ide na kraj kopije. Prazna: nova sesija dobija samo prompt.
+ *
+ * Zašto fork kao default: kad korisnik prebacuje posao u drugu sesiju, ta
+ * sesija gotovo uvek treba da ZNA šta se do sada radilo. Prazna sesija je
+ * izuzetak („kreni ispočetka, u drugom prozoru").
+ *
+ * Zašto NE marker u tekstu: prompt je korisnikov tekst — tumačenje `--new` na
+ * njegovom početku je krhko (pogrešno poklapanje, i ne vidi se u draftu kao
+ * izbor). Klik/dropdown i ime komande su jednoznačni.
+ * */
 
-/** Folder u koji branch ruta upisuje oznaku za svaku sesiju koju je napravila.
- *  `branch.sh` je čita pre POST-a, da se ista sesija ne bi granala DRUGI put:
- *  2026-10-07 se nova sesija sama ponovo branchovala (Gemini je u njoj pozvao
- *  skill `branch-into-new-session`), pa je korisnikov tekst ostao u međusesiji
- *  a on je gledao treću. Vidi i BRANCH_GUARD_TEXT ispod. */
+/** Oznaka „ova sesija je dete grananja" — `branch.sh` je čita da ne grana
+ *  sesiju koja je i sama nastala grananjem (2026-10-07: model je u novoj
+ *  sesiji sam pozvao skill i napravio TREĆU, a korisnikov tekst je ostao u
+ *  međusesiji). */
 const BRANCH_CHILD_DIR = join(homedir(), 'dsh', '.branch-into-new-session', 'children')
 
-/** Upis oznake „ova sesija je dete branch-a". Best-effort: ako upis padne,
- *  grananje se NE obara — samo izgubimo zaštitu od ponovnog grananja. */
-async function markBranchChild(sessionId, parentSession, smart) {
+/** Upis oznake deteta. Best-effort: ako padne, gubi se samo zaštita. */
+async function markBranchChild(sessionId, parentSession) {
   try {
     await mkdir(BRANCH_CHILD_DIR, { recursive: true })
     await writeFile(
       join(BRANCH_CHILD_DIR, sessionId),
-      JSON.stringify({ sessionId, parentSession: parentSession ?? null, smart: smart === true, at: new Date().toISOString() }) + '\n',
+      JSON.stringify({ sessionId, parentSession: parentSession ?? null, at: new Date().toISOString() }) + '\n',
       'utf8',
     )
   } catch (error) {
@@ -644,33 +610,175 @@ async function markBranchChild(sessionId, parentSession, smart) {
   }
 }
 
-/** Uputstvo koje ide UZ prosleđeni prompt, kao prvi `text` deo.
+/**
+ * Uputstvo koje ide UZ prosleđeni prompt.
  *
- * Zašto: model u novoj sesiji pročita prompt koji govori o grananju, nađe
- * `branch-into-new-session` u katalogu skillova (opis mu se poklapa sa
- * „prebaci ovo u novu sesiju") i sam napravi JOŠ jednu sesiju — pa korisnikov
- * tekst ostane u međusesiji. Ovo je prva linija odbrane; druga je oznaka iz
- * `markBranchChild` koju proverava `branch.sh`. */
+ * Zašto: model u novoj sesiji pročita prompt o grananju, nađe
+ * `branch-into-new-session` u katalogu skillova i sam napravi JOŠ jednu
+ * sesiju — pa korisnikov tekst ostane u međusesiji. Ovo je prva linija
+ * odbrane; druga je oznaka iz `markBranchChild` koju proverava `branch.sh`.
+ *
+ * Kod forka se dodaje i uputstvo o kontekstu: istorija je tu kao KONTEKST, a
+ * zadatak je ono što piše u poslednjoj poruci.
+ */
 const BRANCH_GUARD_TEXT = [
   '<system-reminder>',
-  'Ova sesija je upravo napravljena rutom `branch-into-new-session` i grananje je VEĆ obavljeno.',
+  'Ova sesija je upravo napravljena grananjem (`branch-into-new-session`) i grananje je VEĆ obavljeno.',
   'Ne pozivaj skill `branch-into-new-session` i ne pokreći `branch.sh` iz ove sesije:',
   'to bi napravilo još jednu sesiju, a korisnikov tekst bi ostao u međusesiji.',
   'Radi zadatak iz poruke ispod — ovde.',
   '</system-reminder>',
 ].join('\n')
 
+const BRANCH_FORK_RULES = [
+  BRANCH_GUARD_TEXT,
+  '',
+  '<system-reminder>',
+  'Istorija iznad je kopirana iz glavne sesije kao KONTEKST, ne kao zadatak.',
+  'Nastavi tačno ono što piše u poslednjoj korisničkoj poruci; ne dovršavaj stari zadatak ako se razlikuje.',
+  '</system-reminder>',
+].join('\n')
+
+/** Workspace koji sadrži izvornu sesiju (ista grupa u sidebar-u), ili po cwd-u. */
+function findWorkspaceFor(ctx, sessionId, cwd) {
+  const registry = ctx.get('workspaceRegistry')
+  const workspaces = registry !== undefined && typeof registry.list === 'function' ? registry.list() : []
+  if (typeof sessionId === 'string' && sessionId !== '') {
+    const direct = workspaces.find((w) => Array.isArray(w.sessionIds) && w.sessionIds.includes(sessionId))
+    if (direct !== undefined) return direct
+  }
+  if (typeof cwd === 'string' && cwd !== '') {
+    const byPath = workspaces.find((w) => w.path === cwd)
+    if (byPath !== undefined) return byPath
+  }
+  return undefined
+}
+
+/**
+ * Napravi novu sesiju za prosleđeni prompt, sa ili bez kopije istorije.
+ *
+ * `withHistory: true`  → `controller.fork` (dete nasleđuje prefiks do zadnjeg
+ *                        ZAVRŠENOG turna) i prompt ide na kraj kopije;
+ * `withHistory: false` → `controller.create` (prazna sesija, samo prompt).
+ *
+ * Jedina implementacija grananja — zovu je ruta, `/branch` i `/branch-new`.
+ *
+ * @param ctx - profilni kontekst (traži `sessionController` i `agents`).
+ * @param options - izvor, `prompt`, `withHistory`, opcioni `cwd`, `rules` i
+ *                  `rulesFirst`.
+ */
+async function sendToNewSession(ctx, options) {
+  const controller = ctx.get('sessionController')
+  if (controller === undefined || typeof controller.prompt !== 'function') {
+    throw Object.assign(new Error('sessionController nije dostupan u ovom profilu'), { status: 503 })
+  }
+  const agents = ctx.get('agents')
+  const parentAgent = agents !== undefined && typeof agents.get === 'function' ? agents.get(options.sessionId) : undefined
+
+  // Model izvorne sesije PRE grananja. I `fork` i `create` detetu po defaultu
+  // daju PROFILNI default model; mi želimo isti model kao izvor, jer se time
+  // poklapa i keš.
+  //
+  // NAMERNO `agent.model.select()` na detetu, a NE
+  // `sessionController.selectModel()`: potonji na kraju zove
+  // `agentDefaultModel.saveSelection()` i time TRAJNO prepiše deployment
+  // default u `cordis.patch.yml`. `model.select()` menja samo tu sesiju.
+  const selection = parentAgent !== undefined && parentAgent.model !== undefined
+    ? parentAgent.model.current()
+    : undefined
+
+  let childSessionId
+  if (options.withHistory === true) {
+    if (typeof controller.fork !== 'function') {
+      throw Object.assign(new Error('sessionController.fork nije dostupan u ovom profilu'), { status: 503 })
+    }
+    try {
+      const forked = await controller.fork({ sessionId: options.sessionId })
+      childSessionId = forked.sessionId
+    } catch (error) {
+      // Najčešći slučaj: sesija još nema ni jedan ZAVRŠEN turn (prvi je u toku),
+      // pa `fork` nema odakle da seče.
+      const raw = error instanceof Error ? error.message : String(error)
+      if (/no completed turn/i.test(raw)) {
+        throw Object.assign(new Error('sesija još nema završen turn — sačekaj da se prvi turn završi, pa pokušaj ponovo'), { status: 409 })
+      }
+      throw error
+    }
+  } else {
+    if (typeof controller.create !== 'function') {
+      throw Object.assign(new Error('sessionController.create nije dostupan u ovom profilu'), { status: 503 })
+    }
+    const workspace = findWorkspaceFor(ctx, options.sessionId, options.cwd)
+    const created = workspace !== undefined
+      ? await controller.create({ workspaceId: workspace.id })
+      : await controller.create({ cwd: options.cwd ?? process.cwd() })
+    childSessionId = created.sessionId
+  }
+
+  let modelError = null
+  if (selection !== undefined && agents !== undefined && typeof agents.get === 'function') {
+    const childAgent = agents.get(childSessionId)
+    if (childAgent !== undefined && childAgent.model !== undefined && typeof childAgent.model.select === 'function') {
+      try {
+        childAgent.model.select(selection)
+      } catch (error) {
+        // Ne obaramo grananje zbog modela — bolje nova sesija na default modelu.
+        modelError = error instanceof Error ? error.message : String(error)
+      }
+    }
+  }
+
+  // Redosled delova je konfigurabilan: fork dobija uputstvo POSLE prompta
+  // (transkript čita prirodno), prazna sesija PRE (zaštita je prvo što vidi).
+  const content = options.rules === undefined
+    ? [{ type: 'text', text: options.prompt }]
+    : options.rulesFirst === true
+      ? [{ type: 'text', text: options.rules }, { type: 'text', text: options.prompt }]
+      : [{ type: 'text', text: options.prompt }, { type: 'text', text: options.rules }]
+
+  try {
+    await controller.prompt({
+      requestId: randomUUID(),
+      sessionId: childSessionId,
+      mode: 'queue',
+      content,
+    }, new AbortController().signal)
+  } catch (error) {
+    // Sesija je već napravljena — javi njen id uz grešku da korisnik ne
+    // izgubi sesiju koja je uspela.
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), { childSessionId })
+  }
+
+  return {
+    sessionId: childSessionId,
+    sourceSessionId: options.sessionId,
+    historyShared: options.withHistory === true,
+    model: selection ?? null,
+    modelError,
+  }
+}
+
+/**
+ * POST {sessionId, prompt, cwd?, mode?} → nova sesija u istom workspace-u.
+ *
+ * `mode` je `"fork"` (default) ili `"new"` — bira ga ULAZ (dropdown na dugmetu,
+ * ime komande, `--history`/`--fresh` u `branch.sh`), nikad tekst prompta.
+ * Sve ide kroz JEDNU funkciju `sendToNewSession`.
+ */
 async function handleBranchSession(ctx, req, res) {
   try {
     const payload = await androidBody(req, res)
     if (payload === undefined) return
     const prompt = payload && typeof payload.prompt === 'string' ? payload.prompt.trim() : ''
+    const withHistory = payload.mode === undefined || payload.mode === null
+      ? payload.history !== false
+      : payload.mode !== 'new'
     if (prompt === '') {
       writeJson(res, 400, { ok: false, error: { code: 'bad-request', message: 'missing "prompt" (non-empty string)' } })
       return
     }
     const controller = ctx.get('sessionController')
-    if (controller === undefined || typeof controller.create !== 'function' || typeof controller.prompt !== 'function') {
+    if (controller === undefined || typeof controller.prompt !== 'function') {
       writeJson(res, 503, {
         ok: false,
         error: { code: 'session-controller-missing', message: 'sessionController nije montiran u ovom profilu' },
@@ -679,89 +787,32 @@ async function handleBranchSession(ctx, req, res) {
     }
     const parentSession = typeof payload.parentSession === 'string' && payload.parentSession !== '' ? payload.parentSession : undefined
     const cwd = typeof payload.cwd === 'string' && payload.cwd !== '' ? payload.cwd : undefined
-
-    // 1) workspace pozivajuće sesije — to je ista GUI grupa
-    const registry = ctx.get('workspaceRegistry')
-    const workspaces = registry !== undefined && typeof registry.list === 'function' ? registry.list() : []
-    let workspace
-    if (parentSession !== undefined) {
-      workspace = workspaces.find((w) => Array.isArray(w.sessionIds) && w.sessionIds.includes(parentSession))
-    }
-    if (workspace === undefined && cwd !== undefined) {
-      workspace = workspaces.find((w) => w.path === cwd)
+    if (withHistory && parentSession === undefined) {
+      writeJson(res, 400, { ok: false, error: { code: 'bad-request', message: 'fork traži "parentSession"; za praznu sesiju pošalji mode: "new"' } })
+      return
     }
 
-    // 2) prazna sesija (create ne kopira istoriju), pa prosleđen prompt
-    const created = workspace !== undefined
-      ? await controller.create({ workspaceId: workspace.id })
-      : await controller.create({ cwd: cwd ?? process.cwd() })
-
-    // „Smart" start: prvi (mali) prompt ide Geminiju, da se ne troši DeepSeek
-    // kontekst ako Gemini može da odradi zadatak. `selectModel` instalira model
-    // za SLEDEĆI request, pa mora pre `prompt`. Isti par koji koristi i
-    // gemini-seek-smart (klijentski hook, GEMINI_SEEK_SCHEDULE).
-    // Može se preskočiti (`smart:false`) ili zameniti (`provider`/`model`).
-    // OD 2026-11-15 smart start je ISKLJUCEN i na ovoj ruti: `smart` je
-    // podrazumevano `false`, pa branchovana sesija krece na profilnom default
-    // modelu (deploy/deepseek-v4.1-flash-1017) umesto na Gemini-ju. Eksplicitno
-    // `smart:true` (ili `--model` u branch.sh) i dalje radi — ruta je time
-    // jedina preostala ulazna tacka za smart dok je prekidac u client.js
-    // (GEMINI_SEEK_ENABLED) iskljucen. Vidi ~/dsh/rules/02-smart-mode.md.
-    const smart = payload.smart === true
-    const provider = typeof payload.provider === 'string' && payload.provider !== ''
-      ? payload.provider
-      : (smart ? 'google' : undefined)
-    const model = typeof payload.model === 'string' && payload.model !== ''
-      ? payload.model
-      : (smart ? 'gemini-flash-lite-latest' : undefined)
-    let modelSelection = null
-    let modelError = null
-    if (provider !== undefined && model !== undefined) {
-      if (typeof controller.selectModel !== 'function') {
-        modelError = 'sessionController.selectModel nije dostupan'
-      } else {
-        try {
-          const selected = await controller.selectModel({ sessionId: created.sessionId, provider, model })
-          modelSelection = (selected && selected.selected) || { provider, model }
-          // Zapamti da je ova sesija „smart" — klijent po tome pali svoj
-          // gemini-seek-smart režim i indikator (vidi branch-info rutu).
-          BRANCH_SMART_SESSIONS.set(created.sessionId, modelSelection)
-        } catch (error) {
-          // Ne obaramo branch zbog modela — bolje da sesija krene na default
-          // modelu nego da zadatak uopšte ne bude prosleđen.
-          modelError = error instanceof Error ? error.message : String(error)
-        }
-      }
-    }
-
-    const signal = new AbortController().signal
-    await controller.prompt({
-      requestId: randomUUID(),
-      sessionId: created.sessionId,
-      mode: 'queue',
-      // Prvi deo je zaštita od ponovnog grananja, drugi je korisnikov tekst.
-      // Nova sesija ne vidi ovaj razgovor, pa bi bez ovoga model pročitao
-      // prompt o grananju i sam pozvao skill (izmereno 2026-10-07).
-      content: [
-        { type: 'text', text: BRANCH_GUARD_TEXT },
-        { type: 'text', text: prompt },
-      ],
-    }, signal)
-
-    // Oznaka za `branch.sh`: ova sesija je već branchovana, ne granaj je opet.
-    // Posle prompta, da se ne upiše ako je grananje ipak palo pre prosleđivanja.
-    await markBranchChild(created.sessionId, parentSession, modelSelection !== null)
+    const workspace = findWorkspaceFor(ctx, parentSession, cwd)
+    const value = await sendToNewSession(ctx, {
+      sessionId: parentSession,
+      prompt,
+      withHistory,
+      cwd,
+      rules: withHistory ? BRANCH_FORK_RULES : BRANCH_GUARD_TEXT,
+      rulesFirst: !withHistory,
+    })
+    // Oznaka za `branch.sh`: ova sesija je već granata, ne granaj je opet.
+    await markBranchChild(value.sessionId, parentSession)
 
     writeJson(res, 200, {
       ok: true,
       value: {
-        sessionId: created.sessionId,
+        sessionId: value.sessionId,
         workspaceId: workspace === undefined ? null : workspace.id,
         group: workspace === undefined ? null : workspace.path,
-        historyShared: false,
-        smart: modelSelection !== null,
-        model: modelSelection,
-        modelError,
+        historyShared: value.historyShared,
+        model: value.model,
+        modelError: value.modelError,
         recursionGuarded: true,
       },
     })
@@ -961,6 +1012,7 @@ async function handlePromptSession(ctx, req, res) {
     })
   }
 }
+
 
 /**
  * readdir() any absolute path plus mtimeMs per entry, so the picker can sort
@@ -1412,6 +1464,50 @@ async function executeRestart(ctx, invocation) {
 }
 
 /** Argument-free manual compaction request, mirroring dsh-command-compact's /compact handler. */
+/**
+ * `/branch [prompt]` → fork u novu sesiju; `/branch-new [prompt]` → prazna.
+ *
+ * Bez argumenta: uzima se DRAFT iz composera te sesije (isto što bi poslalo
+ * dugme), pa komanda radi i kad se samo otkuca `/branch`. Draft se NE briše —
+ * komanda ga ne troši (za razliku od slanja poruke), a korisnik vidi šta je
+ * otišlo.
+ */
+async function executeBranchMode(ctx, invocation, withHistory) {
+  const prompt = invocation.rawInput.trim()
+  if (prompt === '') {
+    // NAMERNO bez „pametnog" fallbacka na poslednju poruku: grananje bi tada
+    // tiho ponovilo stari prompt, a korisnik nije napisao ništa novo.
+    return { kind: 'error', text: 'Usage: /' + (withHistory ? 'branch' : 'branch-new') + ' <prompt>' }
+  }
+  if (invocation.signal.aborted) return { kind: 'error', text: 'Cancelled.' }
+  const parentSession = invocation.agent.session.id
+  try {
+    const value = await sendToNewSession(ctx, {
+      sessionId: parentSession,
+      prompt,
+      withHistory,
+      rules: withHistory ? BRANCH_FORK_RULES : BRANCH_GUARD_TEXT,
+      rulesFirst: !withHistory,
+    })
+    await markBranchChild(value.sessionId, parentSession)
+    return {
+      kind: 'success',
+      text: `grananje: ${value.sessionId}\n${withHistory ? 'Istorija kopirana (fork).' : 'Nova prazna sesija.'} Izvorna sesija nastavlja nesmetano.`,
+    }
+  } catch (error) {
+    const child = error && error.childSessionId !== undefined ? ` (sesija je napravljena: ${error.childSessionId})` : ''
+    return { kind: 'error', text: `${error instanceof Error ? error.message : String(error)}${child}` }
+  }
+}
+
+async function executeBranch(ctx, invocation) {
+  return executeBranchMode(ctx, invocation, true)
+}
+
+async function executeBranchNew(ctx, invocation) {
+  return executeBranchMode(ctx, invocation, false)
+}
+
 async function executeClear(ctx, invocation) {
   if (invocation.rawInput.trim().length > 0) {
     return { kind: 'error', text: 'Usage: /clear-context (no arguments)' }

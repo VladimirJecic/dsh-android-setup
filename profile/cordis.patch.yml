@@ -82,6 +82,16 @@
           # primenio svoj default `high`, tj. "off" bi tiho mislio.
           # ----------------------------------------------------------------
           - id: deepseek-ai/deepseek-v4.1-flash-1017
+            # VIZI SLIKE (provereno 2026-11-15 direktnim pozivom na Deploy):
+            # model prima `image_url` i tacno opise sadrzaj; odgovor nosi
+            # `prompt_tokens_details.image_tokens` (~947 za screenshot).
+            # Bez ove linije pi-ai rucno deklarisan model smatra tekstualnim
+            # (`input: ["text"]`), pa `read_image` pada sa "model does not
+            # declare image input" — iako model ume. Zato je OBAVEZNA.
+            # PAZI: `reasoning_effort` trosi `max_completion_tokens`; sa malim
+            # limitom reasoning pojede sve i `content` ostane prazan string
+            # (test sa 40 tokena vratio je "" uz reasoning_tokens=203).
+            input: [text, image]
             reasoningEfforts:
               "off": none
               low: low
@@ -591,8 +601,7 @@
         name: '@deepseek-ai/dsh-skill-filesystem'
         config:
           customSkillDirs:
-            - !!js process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@deepseek-ai/dsh-agent-preset/package.json')),
-              'skills')
+            - !!js process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('@deepseek-ai/dsh-agent-preset/package.json')), 'skills')
       - id: tool-skill
         name: '@deepseek-ai/dsh-tool-skill'
       - id: present
@@ -603,5 +612,4 @@
       - id: tool-plugin-market
         name: '@deepseek-ai/dsh-plugin-market/tools'
         disabled: !!js "!ctx.get('profileContext')"
-
 # <<< preset-compaction <<<

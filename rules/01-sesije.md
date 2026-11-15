@@ -19,6 +19,23 @@ Ime je na oba mesta isto — **`restart-dsh`**. Skill nosi
 `user-invocable: false` da se isti naziv ne pojavi dvaput u „+" meniju (jednom
 kao *Skills*, jednom kao *Commands*); model ga i dalje vidi i poziva.
 
+### Agent NE može da restartuje dsh iz sopstvenog tool poziva (2026-11-15)
+
+Ako agent pokrene `restart-dsh.sh` **sinhrono** iz `bash` alata, skripta ubije
+dsh — a dsh je taj koji izvršava taj `bash` poziv. Rezultat: alat vrati
+„tool call aborted", iako je **restart uspeo**. Izmereno 2026-11-15 14:20:20:
+log ima `kill + relaunch (delay=2s)` i `TERM na 1563`, dsh se vratio na novom
+PID-u, a poziv je prijavljen kao prekinut.
+
+Zato:
+
+- **Restart iz agenta znači prekid razgovora** — pre njega pitaj korisnika i
+  reci mu da će sesija na kratko stati.
+- Posle njega **ne tvrdi da je pao** dok ne proveriš: `curl -s -o /dev/null -w
+  '%{http_code}\n' http://127.0.0.1:3081` (401 = živ) i `tail ~/dsh/restart-dsh.log`.
+- Iz GUI-ja (`/restart-dsh`) nema ovog problema: komanda skriptu pokreće
+  **detaširano**, pa restart preživi.
+
 **Zašto (istorija):** ranije su postojale **dve** komande za istu stvar —
 `/restart` (plugin) i skill `restart-dsh`, sa odvojenom logikom, pa su se
 razlikovale i unosile zabunu. Ujedinjeno 2026-10-07: plugin više ne zna kako se
@@ -80,8 +97,7 @@ Zatvoren tab / sumnja → **hard refresh**; ako i to ne pomogne → `restart-dsh
 - **`blank` sesija se reuse-uje:** „+" ne pravi uvek novu — dsh preuzme
   postojeću praznu sesiju u istom workspace-u.
 - **Grupa = workspace.** `branch-into-new-session` pravi novu praznu sesiju u
-  **istom** workspace-u kao pozivajuća, sa **smart startom** (prvi prompt ide
-  Gemini) i **odmah se zaustavlja**.
+  **istom** workspace-u kao pozivajuća i **odmah se zaustavlja**.
 - **Zaštita od ponovnog grananja:** branch ruta upisuje oznaku u
   `~/dsh/.branch-into-new-session/children/<sessionId>` i uz prompt šalje
   `<system-reminder>` koji modelu zabranjuje da sam pozove skill grananja. Bez
@@ -89,6 +105,42 @@ Zatvoren tab / sumnja → **hard refresh**; ako i to ne pomogne → `restart-dsh
   sesiju (izmereno 2026-10-07).
 - Oznaka „ova sesija je smart-branched" je u `localStorage` i preživljava
   reload i restart.
+
+## Grananje u novu sesiju — JEDAN mehanizam, dva moda (od 2026-11-15)
+
+**Mod bira ULAZ, nikad tekst prompta** — nema markera u promptu.
+
+| Ulaz | Mod |
+|---|---|
+| dropdown na dugmetu (strelice) → *Fork (sa istorijom)* | fork |
+| dropdown na dugmetu → *Nova (prazna)* | prazna |
+| `/branch <prompt>` | fork |
+| `/branch-new <prompt>` | prazna |
+| `branch.sh <fajl>` | prazna (default) |
+| `branch.sh --history <fajl>` | fork |
+
+- **Jedna implementacija:** `sendToNewSession` u
+  `~/dsh/dsh-composer-extras/index.js`; zovu je ruta, obe komande i oba moda
+  dugmeta. Ruta: `POST /composer-extras/api/branch-session` sa
+  `{prompt, parentSession, cwd, mode}`.
+- **fork** = `controller.fork` → dete nasleđuje prefiks do zadnjeg
+  **završenog** turna, prompt ide na kraj kopije. Granica je završen turn, pa
+  snimak nikad nema nedovršene `tool-call`-ove (`history ends with unresolved
+  tools`), a prefiks zahteva ostaje identičan → provider-ov keš pogađa.
+  Ako sesija nema završen turn → `409`.
+- **prazna** = `controller.create`; dete ne vidi istoriju.
+- **Model:** dete dobija **isti** model kao izvor, preko `agent.model.select()`
+  — NAMERNO ne `sessionController.selectModel`, jer taj put trajno prepiše
+  profilni default ([`02-smart-mode.md`](02-smart-mode.md)).
+- **Keš izvorne sesije se NE kvari** grananjem — ona ne dobija ni jedan nov
+  event (izmereno 2026-11-15: `cacheRead` nastavlja da raste oko grananja).
+- **Prikaz:** GUI se prebacuje na novu sesiju i za dugme i za komande
+  (klijent sluša `command/executed` za `branch`/`branch-new`). Server ne zna
+  koji prozor gledaš, zato je prebacivanje klijentska stvar.
+- **Zaštita od ponovnog grananja** ostaje: ruta upisuje oznaku u
+  `~/dsh/.branch-into-new-session/children/<sessionId>`, a prompt nosi
+  `<system-reminder>` koji modelu zabranjuje da sam grana dalje (2026-10-07:
+  model je u novoj sesiji sam pozvao skill i napravio treću).
 
 ## Poruka drugoj sesiji (`message-session`)
 

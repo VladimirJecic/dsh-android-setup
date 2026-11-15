@@ -12,15 +12,23 @@
 #   -s <id>      id pozivajuce sesije (default: $DSH_SESSION_ID)
 #   -c <dir>     cwd (default: cwd iz zaglavlja pozivajuce sesije)
 #   -t <naslov>  naslov (samo za log; nova sesija se sama titluje iz prompta)
-#   --model p/m  model za PRVI prompt (default: google/gemini-flash-lite-latest)
-#   --no-smart   ne diraj model — sesija krece na profilnom default modelu
+#   --history    nova sesija je FORK: kopira istoriju (do zadnjeg zavrsenog
+#                turna) pa dodaje prompt na kraj. Bez ovoga je PRAZNA.
+#   --fresh      prazna sesija (default; izricito ponistava --history)
+#
+# Mod se NE cita iz teksta prompta (nema `--new` u promptu) — bira ga ovaj
+# flag, odnosno dropdown na dugmetu u GUI-ju i ime komande (/branch vs
+# /branch-new).
+#   --model p/m  ukljuci smart start sa MODELOM za PRVI prompt
+#   --smart      ukljuci smart start (default: google/gemini-flash-lite-latest)
+#   --no-smart   (default) ne diraj model — sesija krece na profilnom defaultu
 #   --dry-run    ispisi sta bi poslao, bez POST-a
 #   --force      dozvoli grananje IZ sesije koja je i sama branchovana
 #   -h           pomoc
 #
 # Ruta: POST /composer-extras/api/branch-session  (plugin dsh-composer-extras)
-#       {prompt, parentSession, cwd, smart, provider, model}
-#       -> {sessionId, workspaceId, group, smart, model}
+#       {prompt, parentSession, cwd, mode, smart, provider, model}
+#       -> {sessionId, workspaceId, group, historyShared, smart, model}
 #
 # ZASTITA OD PONOVNOG GRANANJA: server upise oznaku u
 # $LOGDIR/children/<sessionId> za svaku sesiju koju napravi. Ako je
@@ -29,9 +37,13 @@
 # (model je u njoj pozvao ovaj skill), pa je korisnikov tekst ostao u
 # medjusesiji. `--force` zaobilazi proveru.
 #
-# SMART START: prvi (mali) prompt ide Geminiju (flash-lite) da se ne angazuje
-# DeepSeek ako zadatak moze da se zavrsi jeftino. Ruta to radi preko
-# sessionController.selectModel, koja vazi za SLEDECI request.
+# SMART START JE ISKLJUCEN (odluka 2026-11-15). Zasto: ruta zove
+# `sessionController.selectModel`, a TAJ put na kraju radi
+# `agentDefaultModel.saveSelection()` — dakle TRAJNO prepise deployment
+# default model u `cordis.patch.yml`. Svako grananje bi tiho prebacilo profil
+# na Gemini Flash-Lite za SVE buduce sesije. Zato je default `SMART=0`
+# (sesija krece na profilnom defaultu), a smart se ukljucuje samo izricito
+# (`--smart` ili `--model p/m`), kad korisnik to bas zeli.
 # Posle izmene plugina treba restart dsh-a da se ruta ucita.
 set -uo pipefail
 
@@ -43,19 +55,23 @@ LOGDIR="$HOME/dsh/.branch-into-new-session"
 PARENT="${DSH_SESSION_ID:-}"
 CWD=""
 TITLE=""
-SMART=1
+SMART=0
 MODEL="google/gemini-flash-lite-latest"
+HISTORY=0
 DRY=0
 FORCE=0
 
-usage() { sed -n '2,35p' "$0"; }
+usage() { sed -n '2,38p' "$0"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     -s) PARENT="${2:?branch.sh: -s trazi id}"; shift 2 ;;
     -c) CWD="${2:?branch.sh: -c trazi dir}"; shift 2 ;;
     -t) TITLE="${2:?branch.sh: -t trazi naslov}"; shift 2 ;;
-    --model) MODEL="${2:?branch.sh: --model trazi provider/model}"; shift 2 ;;
+    --history) HISTORY=1; shift ;;
+    --fresh) HISTORY=0; shift ;;
+    --model) MODEL="${2:?branch.sh: --model trazi provider/model}"; SMART=1; shift 2 ;;
+    --smart) SMART=1; shift ;;
     --no-smart) SMART=0; shift ;;
     --dry-run) DRY=1; shift ;;
     --force) FORCE=1; shift ;;
@@ -89,6 +105,7 @@ if [ "$DRY" = 1 ]; then
   echo "  cwd    : ${CWD:-<nema>}"
   echo "  naslov : $TITLE"
   echo "  prompt : $PROMPT_FILE ($(wc -c <"$PROMPT_FILE") B)"
+  if [ "$HISTORY" = 1 ]; then echo "  mod    : fork (kopira istoriju)"; else echo "  mod    : nova (prazna sesija)"; fi
   if [ "$SMART" = 1 ]; then echo "  model  : $MODEL (prvi prompt)"; else echo "  model  : (default profila — --no-smart)"; fi
   exit 0
 fi
@@ -118,6 +135,7 @@ BRANCH_CWD="$CWD" \
 BRANCH_PROMPT_FILE="$PROMPT_FILE" \
 BRANCH_TITLE="$TITLE" \
 BRANCH_SMART="$SMART" \
+BRANCH_HISTORY="$HISTORY" \
 BRANCH_MODEL="$MODEL" \
 BRANCH_LOG="$LOGDIR/branch-$STAMP.log" \
 python3 - <<'PY'
@@ -131,10 +149,12 @@ log = os.environ.get("BRANCH_LOG") or ""
 prompt = open(os.environ["BRANCH_PROMPT_FILE"], encoding="utf-8").read()
 
 smart = os.environ.get("BRANCH_SMART", "1") == "1"
+history = os.environ.get("BRANCH_HISTORY", "0") == "1"
+mode = "fork" if history else "new"
 spec = os.environ.get("BRANCH_MODEL", "") or ""
 provider = spec.split("/", 1)[0] if "/" in spec else None
 model = spec.split("/", 1)[1] if "/" in spec else None
-body_obj = {"prompt": prompt, "parentSession": parent, "cwd": cwd, "smart": smart}
+body_obj = {"prompt": prompt, "parentSession": parent, "cwd": cwd, "smart": smart, "mode": mode}
 if smart and provider and model:
     body_obj["provider"] = provider
     body_obj["model"] = model

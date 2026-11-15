@@ -163,6 +163,9 @@ function makeInput(initialDraft = "") {
 
 let activeInput = null;
 
+/** Slušalaci registrovani preko `ctx.on` (btw komanda sluša `command/executed`). */
+const eventListeners = new Map();
+
 const ctx = {
 	slots: {
 		inject(name, cb) {
@@ -176,6 +179,19 @@ const ctx = {
 	},
 	sessions: {
 		scope: (id) => ({ sessionId: id }),
+	},
+	on(name, listener) {
+		if (!eventListeners.has(name)) eventListeners.set(name, []);
+		eventListeners.get(name).push(listener);
+		return () => {
+			const list = eventListeners.get(name) || [];
+			const index = list.indexOf(listener);
+			if (index >= 0) list.splice(index, 1);
+		};
+	},
+	/** Emituj kao što to radi `CommandUiRuntime.notifyExecuted`. */
+	emit(name, ...args) {
+		for (const listener of eventListeners.get(name) || []) listener(...args);
 	},
 	get(name) {
 		if (name === "conversation") {
@@ -486,32 +502,44 @@ section("4b. ContextGuard — centriran modal u portalu, klik na masku zatvara")
 
 // ── 5. Branch dugme ───────────────────────────────────────────────────────
 
-section("5. BranchIntoNewSessionButton (dve unakrsne strelice)");
+section("5. BranchIntoNewSessionButton (strelica + dropdown moda)");
 
 {
+	// Prazan draft: meni se otvori, ali izbor ne šalje zahtev.
 	fetchCalls.length = 0;
 	activeInput = makeInput("");
 	resetHooks();
 	const tree = render("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
 	const btn = buttons(tree)[0];
 	check("dugme postoji", btn !== undefined);
-	btn.props.onClick();
+	btn.props.onClick({ currentTarget: "anchor" });
 
 	const post = fetchCalls.find((c) => c.url.includes("/api/branch-session"));
 	check("prazan draft → NE šalje zahtev", post === undefined);
 
 	// setState iz onClick-a se vidi tek na sledećem renderu iste instance.
 	const after = rerender("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
-	check("prazan draft → prikazuje uputstvo", /napiši prompt/i.test(textOf(after)), textOf(after));
+	const forkBtn = walk(after).find((n) => n.props && n.props["data-composer-extras-branch-mode"] === "fork");
+	forkBtn.props.onClick();
+	check("prazan draft → NE šalje zahtev ni posle izbora moda",
+		fetchCalls.find((c) => c.url.includes("/api/branch-session")) === undefined);
+	const afterPick = rerender("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
+	check("prazan draft → prikazuje uputstvo", /napiši prompt/i.test(textOf(afterPick)), textOf(afterPick));
 }
 
 {
+	// Neprazan draft: izbor moda šalje POST i prebacuje prikaz.
 	fetchCalls.length = 0;
+	ctx.uiWorkspace.opened.length = 0;
 	activeInput = makeInput("Napravi rezime sezone 3");
 	resetHooks();
 	const tree = render("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
-	buttons(tree)[0].props.onClick();
+	buttons(tree)[0].props.onClick({ currentTarget: "anchor" });
+	const opened = rerender("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
+	const forkBtn = walk(opened).find((n) => n.props && n.props["data-composer-extras-branch-mode"] === "fork");
+	forkBtn.props.onClick();
 	await Promise.resolve();
+	await new Promise((r) => setTimeout(r, 10));
 
 	const post = fetchCalls.find((c) => c.url.includes("/api/branch-session"));
 	check("neprazan draft → POST /composer-extras/api/branch-session", post !== undefined);
@@ -519,15 +547,150 @@ section("5. BranchIntoNewSessionButton (dve unakrsne strelice)");
 		const body = JSON.parse(post.opts.body);
 		check("šalje trenutni draft kao prompt", body.prompt === "Napravi rezime sezone 3", JSON.stringify(body));
 		check("šalje parentSession", body.parentSession === "session-src");
-		check("NE zahteva kopiranje istorije (historyShared se ne šalje)", body.historyShared === undefined);
+		check("šalje mode (fork/new), ne historyShared", body.mode === "fork" && body.historyShared === undefined,
+			JSON.stringify(body));
 	}
-	await new Promise((r) => setTimeout(r, 10));
 	check("prebacuje GUI na novu sesiju", ctx.uiWorkspace.opened.includes("session-new-1"),
 		JSON.stringify(ctx.uiWorkspace.opened));
 }
 
-// ── 6. Newline dugme ──────────────────────────────────────────────────────
+// ── 5b. Grananje: dropdown mod + /branch komande ──────────────────────────
 
+section("5b. Dugme grananja sa dropdown-om (fork vs nova) i /branch komande");
+
+{
+	// Klik na strelice OTVARA meni — ne pravi sesiju odmah.
+	fetchCalls.length = 0;
+	activeInput = makeInput("nastavi ovo u novoj sesiji");
+	resetHooks();
+	const tree = render("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
+	const btn = buttons(tree)[0];
+	check("dugme grananja postoji", btn !== undefined);
+	check("dugme nosi data-composer-extras=branch", btn.props["data-composer-extras"] === "branch",
+		String(btn.props["data-composer-extras"]));
+	btn.props.onClick({ currentTarget: "anchor" });
+	const after = rerender("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
+	check("klik samo otvara meni — još NEMA zahteva",
+		fetchCalls.find((c) => c.url.includes("/api/branch-session")) === undefined);
+	const modeButtons = walk(after).filter((n) => n.props && n.props["data-composer-extras-branch-mode"] !== undefined);
+	check("meni nudi TAČNO dve opcije (fork i nova)", modeButtons.length === 2, String(modeButtons.length));
+	check("opcije su fork i new",
+		modeButtons.map((n) => n.props["data-composer-extras-branch-mode"]).sort().join(",") === "fork,new",
+		modeButtons.map((n) => n.props["data-composer-extras-branch-mode"]).join(","));
+}
+
+{
+	// Izbor „fork" šalje mode=fork.
+	fetchCalls.length = 0;
+	ctx.uiWorkspace.opened.length = 0;
+	activeInput = makeInput("prebaci ovo");
+	resetHooks();
+	const tree = render("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
+	buttons(tree)[0].props.onClick({ currentTarget: "anchor" });
+	const opened = rerender("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
+	const forkBtn = walk(opened).find((n) => n.props && n.props["data-composer-extras-branch-mode"] === "fork");
+	check("fork opcija postoji", forkBtn !== undefined);
+	forkBtn.props.onClick();
+	await Promise.resolve();
+	await new Promise((r) => setTimeout(r, 10));
+	const post = fetchCalls.find((c) => c.url.includes("/api/branch-session"));
+	check("fork → POST /api/branch-session", post !== undefined);
+	if (post) {
+		const body = JSON.parse(post.opts.body);
+		check("fork šalje mode='fork'", body.mode === "fork", JSON.stringify(body));
+		check("fork šalje draft kao prompt", body.prompt === "prebaci ovo", JSON.stringify(body));
+		check("fork šalje parentSession", body.parentSession === "session-src");
+	}
+	check("posle uspeha draft je obrisan", activeInput.draft === "", JSON.stringify(activeInput.draft));
+}
+
+{
+	// Izbor „new" šalje mode=new.
+	fetchCalls.length = 0;
+	activeInput = makeInput("kreni ispočetka");
+	resetHooks();
+	const tree = render("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
+	buttons(tree)[0].props.onClick({ currentTarget: "anchor" });
+	const opened = rerender("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
+	const newBtn = walk(opened).find((n) => n.props && n.props["data-composer-extras-branch-mode"] === "new");
+	check("new opcija postoji", newBtn !== undefined);
+	newBtn.props.onClick();
+	await Promise.resolve();
+	await new Promise((r) => setTimeout(r, 10));
+	const post = fetchCalls.find((c) => c.url.includes("/api/branch-session"));
+	check("new → POST /api/branch-session", post !== undefined);
+	if (post) {
+		const body = JSON.parse(post.opts.body);
+		check("new šalje mode='new'", body.mode === "new", JSON.stringify(body));
+	}
+}
+
+{
+	// Prazan draft: ni meni ne vodi u zahtev.
+	fetchCalls.length = 0;
+	activeInput = makeInput("");
+	resetHooks();
+	const tree = render("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
+	buttons(tree)[0].props.onClick({ currentTarget: "anchor" });
+	const opened = rerender("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
+	const forkBtn = walk(opened).find((n) => n.props && n.props["data-composer-extras-branch-mode"] === "fork");
+	forkBtn.props.onClick();
+	await Promise.resolve();
+	await new Promise((r) => setTimeout(r, 10));
+	check("prazan draft → NE šalje zahtev (ni posle izbora moda)",
+		fetchCalls.find((c) => c.url.includes("/api/branch-session")) === undefined);
+}
+
+{
+	// Mod se NE čita iz teksta — prompt koji počinje sa --new ide kao običan tekst.
+	fetchCalls.length = 0;
+	activeInput = makeInput("--new ovo je samo tekst");
+	resetHooks();
+	const tree = render("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
+	buttons(tree)[0].props.onClick({ currentTarget: "anchor" });
+	const opened = rerender("conversation.input.left", "composer-extras-branch-new-session", { sessionId: "session-src" });
+	const forkBtn = walk(opened).find((n) => n.props && n.props["data-composer-extras-branch-mode"] === "fork");
+	forkBtn.props.onClick();
+	await Promise.resolve();
+	await new Promise((r) => setTimeout(r, 10));
+	const post = fetchCalls.find((c) => c.url.includes("/api/branch-session"));
+	if (post) {
+		const body = JSON.parse(post.opts.body);
+		check("--new u tekstu se NE tumači (mode ostaje fork)", body.mode === "fork", JSON.stringify(body));
+		check("--new ostaje deo prompta", body.prompt === "--new ovo je samo tekst", JSON.stringify(body));
+	}
+}
+
+{
+	// Komande: /branch i /branch-new prebacuju prikaz na novu sesiju.
+	ctx.uiWorkspace.opened.length = 0;
+	ctx.emit("command/executed", "session-src", "branch", {
+		kind: "success", text: "grananje: session-aaaa1111-2222-3333-4444-555566667777\nIstorija kopirana.",
+	});
+	ctx.emit("command/executed", "session-src", "branch-new", {
+		kind: "success", text: "grananje: session-bbbb1111-2222-3333-4444-555566667777\nNova prazna sesija.",
+	});
+	await new Promise((r) => setTimeout(r, 10));
+	check("/branch otvara novu sesiju",
+		ctx.uiWorkspace.opened.includes("session-aaaa1111-2222-3333-4444-555566667777"),
+		JSON.stringify(ctx.uiWorkspace.opened));
+	check("/branch-new otvara novu sesiju",
+		ctx.uiWorkspace.opened.includes("session-bbbb1111-2222-3333-4444-555566667777"),
+		JSON.stringify(ctx.uiWorkspace.opened));
+}
+
+{
+	// Ostale komande ne diraju prikaz.
+	ctx.uiWorkspace.opened.length = 0;
+	ctx.emit("command/executed", "session-src", "compact", {
+		kind: "success", text: "grananje: session-deadbeef-0000-0000-0000-000000000000",
+	});
+	await new Promise((r) => setTimeout(r, 10));
+	check("druga komanda ne prebacuje prikaz", ctx.uiWorkspace.opened.length === 0,
+		JSON.stringify(ctx.uiWorkspace.opened));
+}
+
+// ── 6. Newline dugme ──────────────────────────────────────────────────────
 section("6. NewlineButton (višeredni prompt)");
 {
 	activeInput = makeInput("prvi red");

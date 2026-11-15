@@ -308,3 +308,31 @@ ffmpeg -y -v error -ss 00:10:43 -i "NN-sub-burnt-vocab.mp4" -frames:v 1 -threads
 
 U folderu epizode na kraju ostaju samo: `partial-prevod.srt`, `partial-prevod.ass`,
 `NN-sub-burnt-vocab.mp4`. Privremene fajlove (testovi, kadrovi) obriši.
+
+## SOFT vs HARD — Black Clover ide SOFT
+
+Dve vrste izlaza, ista komanda `burn.py`, razlika je flag:
+
+| | komanda | traje | izlaz | titl vide |
+|---|---|---|---|---|
+| **SOFT** (za Black Clover) | `--soft` | **~4 s** | `NN-soft-vocab.mkv` | VLC, Kodi, mpv, Infuse — TV ponekad ne |
+| HARD (default) | bez flaga | ~13 min | `NN-sub-burnt-vocab.mp4` | svuda, titl je deo slike |
+
+```bash
+# SOFT — Black Clover, velika serija, isti titl u ASS traci
+python3 $B -i "<video>.mkv" -s partial-prevod.ass --soft -o "NN-soft-vocab.mkv"
+
+# HARD — kad treba da TV/Chromecast sigurno prikaže titl
+python3 $B -i "<video>.mkv" -s partial-prevod.ass -o "NN-sub-burnt-vocab.mp4" --pozadina
+```
+
+**Za Black Clover uvek SOFT** (dogovoreno 2026-11-15, provereno na ep15): 200+
+epizoda, a soft je 4 s umesto 13 min. MKV je obavezan jer MP4 ne prima ASS —
+`mov_text` gubi poziciju, pa dve trake ne mogu da stoje gore i dole.
+
+`--soft` sam proverava posle rendera: trajanje, ASS traka, **isti stilovi
+(`Vocab`=Alignment 8, `Default`=2) i isti broj `Dialogue` linija** kao ulaz. Ako
+se ne poklopi, fajl ne dobija konačno ime.
+
+Soft ne dira video ni audio (stream copy) — nema reenkodiranja, nema gubitka
+kvaliteta, nema čekanja. Zato nema ni `--pozadina` ni `--status`.
