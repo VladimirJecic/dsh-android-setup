@@ -11,8 +11,12 @@
 | Slobodno | **24,5 GB** |
 | Gotovo SOFT | **E15** (`15-soft-vocab.mkv`, 344 MB, 4 s render) |
 | Gotovo HARD (stari režim) | E03–E14 (12 MP4-ova, ~1 GB svaki) |
-| Ostalo originala | **E16–E51 (36 MKV-ova)** |
+| Ostalo originala | **E16–E51 (36 MKV-ova)** — E15 MKV obrisan po novom protokolu |
 | Obrisano | E01–E15 MKV + folderi ep01/ep02 (gledani) |
+
+**Napomena o E15:** napravljena je pre ovog plana i **nema `.done.json`**. Zato
+kapija 1 ne sme da bude tvrda — ako `.done.json` nema, stanje se **izvodi iz
+fajlova** (kapije 2–10). Sve epizode od E16 nadalje pišu `.done.json`.
 
 ## 1. SOFT menja sve — izmereno, ne procena
 
@@ -111,7 +115,7 @@ chain.sh (supervizor: flock, setsid, termux-wake-lock)
 
 | # | Provera | Kako |
 |---|---|---|
-| 1 | `.done.json` postoji, `ok !== false` | jq |
+| 1 | `.done.json` postoji, `ok !== false` — **ako ga nema** (npr. E15), izvedi iz fajlova 2–10 | jq |
 | 2 | `epNN/partial-prevod.ass` i `.srt` postoje, `.ass` > 20 KB | stat |
 | 3 | SRT: ≥ 200 blokova sa `{\an8}`, svaki par ima ` = ` sa nepr. desnom stranom | python |
 | 4 | Nema istog ključa sa različitim prevodom | python |

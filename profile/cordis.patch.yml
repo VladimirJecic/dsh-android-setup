@@ -104,6 +104,28 @@
     model: deepseek-ai/deepseek-v4.1-flash-1017
     reasoningEffort: max
 
+# ── llm-deepseek: ne osvezavaj listu modela sa api.deepseek.com ────────────
+# Plugin `@deepseek-ai/dsh-llm-deepseek-api-key` (dolazi iz dsh-base) svakih
+# 10 min pita `https://api.deepseek.com/models` i svaki pokusaj loguje liniju
+# „[llm-deepseek-api-key] model listing from … loaded 2 model(s)". Pri losoj
+# mrezi to bude i „timed out after 5000 ms".
+#
+# Zasto je to ovde cisto smece: modeli se ne biraju sa te rute nego sa
+# `deploy` (api-cdn.deploy.com). Lista od 2 modela sa zvanicnog API-ja se ne
+# koristi, a DeepSeek ne menja modele cesto — jednom u dva dana (ili mesec)
+# bi bilo dovoljno, a 10 min je cesto.
+#
+# `modelsMaxAgeMs: 0` NIJE „osvezi svaki put" — u `ModelListingCache.schedule()`
+# nula znaci `return` pre zakazivanja tajmera, tj. listanje se potpuno GASI
+# (provereno u kodu, dsh-llm-deepseek 0.2.2-rc.1, linija ~2643). Ruta
+# `deepseek-official` ostaje funkcionalna — koristi ugradjeni katalog, samo se
+# ne osvezava sa mreze. `modelsTimeoutMs` je skracen na 3 s da i prvi pokusaj
+# pri bootu brze odustane kad nema mreze.
+- id: llm-deepseek
+  config:
+    modelsMaxAgeMs: 0
+    modelsTimeoutMs: 3000
+
 - id: ui-settings-general
   name: "@deepseek-ai/dsh-client-ui-settings-general"
   config:

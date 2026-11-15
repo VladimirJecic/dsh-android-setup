@@ -271,28 +271,38 @@ pa onaj sa najviše blokova. Prvo pogledaj šta je izabrao.
 
 ## Render — preko skilla burn-subtitle
 
-Render radi `burn.py` iz skilla **burn-subtitle**, direktno iz MKV-a ili MP4-a.
+Render radi `burn.py` iz skilla **burn-subtitle**, direktno iz MKV-a.
 MKV se **ne** konvertuje prethodno u MP4 — to bi samo dupliralo vreme.
+
+**Za Black Clover je izlaz SOFT** (vidi sekciju „SOFT vs HARD" ispod):
+video i audio se kopiraju, titl ide kao ASS traka, gotovo je za ~4 s.
 
 ```bash
 B=~/.dsh/skills/burn-subtitle/burn.py
-python3 $B -i "<video>" -s partial-prevod.ass -o "NN-sub-burnt-vocab.mp4" --pozadina
-python3 $B --status "NN-sub-burnt-vocab.mp4"   # na 60 s, dok ne piše GOTOVO
-python3 $B --stop   "NN-sub-burnt-vocab.mp4"   # ako mora da se prekine (npr. greška u rečniku)
+python3 $B -i "<video>.mkv" -s partial-prevod.ass --soft -o "NN-soft-vocab.mkv"
 ```
 
-`--pozadina` je obavezno (inače alat prekine render na 60 s). Status proveravaj
-**na 60 s**, ne na 20 — svaki poll vraća liniju u kontekst, a render 24-min epizode
-traje ~14 min. `--stop` ubija i ffmpeg dete (process group), pa posle njega ne
-ostaje zaostali proces. `burn.py` uzima **englesku** audio traku, pravi 8-bitni
-H.264 sa zvukom koji TV pušta i daje fajlu konačno ime tek kad prođe proveru
-trajanja. Ako ispiše `UPOZORENJE: nema audio jezika 'eng'`, javi korisniku koja
-je traka uzeta. Opcije i detalji: SKILL.md skilla burn-subtitle.
+HARD render (upečen titl u MP4, za TV) samo kad korisnik to izričito traži:
+
+```bash
+python3 $B -i "<video>" -s partial-prevod.ass -o "NN-sub-burnt-vocab.mp4" --pozadina
+python3 $B --status "NN-sub-burnt-vocab.mp4"   # na 60 s, dok ne piše GOTOVO
+python3 $B --stop   "NN-sub-burnt-vocab.mp4"   # ako mora da se prekine
+```
+
+Kod hard rendera `--pozadina` je obavezno (inače alat prekine render na 60 s),
+a status se proverava **na 60 s** — render 24-min epizode traje ~14 min.
+
+`burn.py` uzima **englesku** audio traku i daje fajlu konačno ime tek kad prođe
+svoju proveru (trajanje, ASS traka, stilovi, broj linija). Ako ispiše
+`UPOZORENJE: nema audio jezika 'eng'`, javi korisniku koja je traka uzeta.
+Opcije i detalji: SKILL.md skilla burn-subtitle.
 
 ## Provera kadra — samo kad treba
 
 Samo ako si menjao stilove/pozicije, ili korisnik prijavi problem. Tekstualni
-QA pokriva ostalo. Na gotovom MP4 titl je deo slike, pa je brzo:
+QA pokriva ostalo. Kod soft izlaza titl je traka, pa se vidi tek u plejeru —
+provera kadra ima smisla samo za hard render:
 
 ```bash
 ffmpeg -y -v error -ss 00:10:43 -i "NN-sub-burnt-vocab.mp4" -frames:v 1 -threads 1 -f image2 provera.png
@@ -306,8 +316,11 @@ ffmpeg -y -v error -ss 00:10:43 -i "NN-sub-burnt-vocab.mp4" -frames:v 1 -threads
    `A1`/`SKIP`/`STOP`/`NAMES` u `lexikon.json` i izbaci je odatle; ili je
    ponovljena u prethodnih 6 blokova (namerno).
 
-U folderu epizode na kraju ostaju samo: `partial-prevod.srt`, `partial-prevod.ass`,
-`NN-sub-burnt-vocab.mp4`. Privremene fajlove (testovi, kadrovi) obriši.
+U folderu epizode na kraju ostaju samo: `<naziv>.deDE.srt` (izvorni nemački
+titl), `partial-prevod.srt`, `partial-prevod.ass`. Soft/hard izlaz ide u koren
+sezone kao `NN-soft-vocab.mkv` (ili `NN-sub-burnt-vocab.mp4`). Privremene
+fajlove (testovi, kadrovi, `kritika_paket.md`, `kritika.json`, `transkript.md`,
+`lexikon_dodaci.json`) obriši.
 
 ## SOFT vs HARD — Black Clover ide SOFT
 
@@ -336,3 +349,33 @@ se ne poklopi, fajl ne dobija konačno ime.
 
 Soft ne dira video ni audio (stream copy) — nema reenkodiranja, nema gubitka
 kvaliteta, nema čekanja. Zato nema ni `--pozadina` ni `--status`.
+
+## Protokol: brisanje originalnog MKV-a (Black Clover)
+
+**Originalni MKV se briše tek kad je epizoda završena I testirana renderom.**
+Redosled je obavezan, bez preskakanja:
+
+1. ceo pipeline do `sacuvaj_recnik.py . --obrisi` prođe;
+2. `burn.py --soft` **sam** proveri rezultat i fajl dobije konačno ime
+   `NN-soft-vocab.mkv` (ne `.part`);
+3. provera da izlaz stvarno postoji i da je trajanje = izvor ±1,5 s;
+4. **tek tada** se briše original `[Judas] Black Clover - S01ENN (0NN).mkv`;
+5. ako bilo šta padne — original **ostaje**, ništa se ne briše.
+
+```bash
+# provera pre brisanja (obe komande moraju da prođu)
+ls -la "NN-soft-vocab.mkv"                       # konačno ime postoji
+ffprobe -v error -show_entries format=duration -of csv=p=0 "NN-soft-vocab.mkv"
+ffprobe -v error -show_entries format=duration -of csv=p=0 "<video>.mkv"   # razlika ≤ 1,5 s
+# pa onda:
+rm -f -- "<video>.mkv"
+```
+
+Zašto: soft izlaz je **manji** od izvora (E15: 344 MB vs 365 MB), pa prostor ne
+raste, a original od 365 MB po epizodi bi se nagomilao na stotine GB. Izlaz
+zadržava video 1:1 (hevc, stream copy), engleski audio i srpski ASS titl — sve
+što je za gledanje potrebno. **Ne čuvaj oba** osim ako korisnik izričito traži.
+
+Ako se original obriše a zatreba hard render za TV: `NN-soft-vocab.mkv` već
+nosi ASS traku, pa se hard renderuje **iz njega** (`-i NN-soft-vocab.mkv -s
+partial-prevod.ass`), bez novog skidanja epizode.

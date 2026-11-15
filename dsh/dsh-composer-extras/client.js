@@ -3359,15 +3359,37 @@ window.__ModuleLoader__.load({
 						// (Podeli / Folder) stoje baš gore-desno — tamo gde i
 						// ovaj bedž. Bedž ih je prekrivao (2026-11-15: „ne vidim
 						// dugme podeli"). Zato se bedž sklanja dok je pregled
-						// fajla otvoren: model je tada nebitan, a dugmad su
-						// jedina radnja koja treba da bude dostupna.
+						// fajla otvoren.
 						//
-						// PAZI: `data-textpreview-state` postoji u sva tri stanja
-						// (unsupported/loading/text) i znači „panel za fajl je
-						// otvoren". Ne koristi `[data-document-preview]` — on se
-						// dodaje samo u `text` stanju, pa bi MKV (unsupported)
-						// prošao kao „nema fajla".
-						var docOpen = document.querySelector("[data-textpreview-state]") !== null;
+						// VAŽNO — panel OSTAJE u DOM-u i kad se sidebar zatvori;
+						// skriva se CSS-om (`visibility: hidden`) preko
+						// `[data-sidebar-right-open]` na vlasniku panela. Zato
+						// puko `querySelector(...) !== null` NIKAD ne vrati bedž
+						// (2026-11-15: „zatvorim sajt bar i on ostane sakriven").
+						// Koristi se ista provera kao dsh-ova `visibleSidebarPane`:
+						// vlasnik panela mora imati `data-sidebar-right-open`, a
+						// panel mora biti van `[hidden]/[aria-hidden]`.
+						//
+						// NAMERNO BEZ filtriranja po sesiji: na telefonu je vidljiva
+						// samo jedna sesija, a uparivanje `data-sidebar-right-session`
+						// sa props-om se pokazalo krhkim — u drugim sesijama bedž se
+						// nije sakrio uopšte (2026-11-15). Otvoren panel u VIDLJIVOM
+						// sidebaru je dovoljan signal; zatvoren panel ne prolazi
+						// proveru `data-sidebar-right-open` ispod.
+						var docOpen = false;
+						try {
+							var panels = document.querySelectorAll("[data-textpreview-state]");
+							for (var pi = 0; pi < panels.length; pi++) {
+								var panel = panels[pi];
+								if (panel.closest('[hidden], [aria-hidden="true"]') !== null) continue;
+								var owner = panel.closest("[data-sidebar-right-session]");
+								var isFloat = panel.closest("[data-dockkit-float]") !== null;
+								if (isFloat || (owner !== null && owner.hasAttribute("data-sidebar-right-open"))) {
+									docOpen = true;
+									break;
+								}
+							}
+						} catch (error) { docOpen = false; }
 						setDocOpen(docOpen);
 						var tabs = document.querySelector("[data-conversation-tabs]");
 						var corner = document.querySelector("[data-conversation-header-corner]");
